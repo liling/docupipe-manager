@@ -1,9 +1,11 @@
 import asyncio
 import logging
 import os
+import shlex
 import shutil
 import signal
 import uuid
+from collections import deque
 from datetime import datetime, timezone
 from tempfile import mkdtemp
 
@@ -29,6 +31,41 @@ class RunnerService:
         self._platform_client = platform_client
         self._session_factory = async_sessionmaker(engine, expire_on_commit=False)
         self._semaphore = asyncio.Semaphore(settings.max_concurrent_runs)
+        self._log_buffers: dict[uuid.UUID, "deque[str]"] = {}
+        self._subscribers: dict[uuid.UUID, set[asyncio.Queue]] = {}
+        self._active_runs: set[uuid.UUID] = set()
+
+    def is_active(self, run_id: uuid.UUID) -> bool:
+        return run_id in self._active_runs
+
+    def subscribe(self, run_id: uuid.UUID) -> tuple[list[str], asyncio.Queue]:
+        buffer = self._log_buffers.get(run_id)
+        history = list(buffer) if buffer else []
+        queue: asyncio.Queue = asyncio.Queue()
+        self._subscribers.setdefault(run_id, set()).add(queue)
+        return history, queue
+
+    def unsubscribe(self, run_id: uuid.UUID, queue: asyncio.Queue) -> None:
+        subs = self._subscribers.get(run_id)
+        if subs and queue in subs:
+            subs.discard(queue)
+            if not subs:
+                self._subscribers.pop(run_id, None)
+
+    def _broadcast(self, run_id: uuid.UUID, line: str) -> None:
+        buffer = self._log_buffers.get(run_id)
+        if buffer is None:
+            buffer = deque(maxlen=2000)
+            self._log_buffers[run_id] = buffer
+        buffer.append(line)
+        for q in list(self._subscribers.get(run_id, ())):
+            q.put_nowait(line)
+
+    async def _close_subscribers(self, run_id: uuid.UUID) -> None:
+        for q in list(self._subscribers.get(run_id, ())):
+            q.put_nowait(None)
+        self._subscribers.pop(run_id, None)
+        self._log_buffers.pop(run_id, None)
 
     async def start_run(
         self,
@@ -75,6 +112,7 @@ class RunnerService:
 
     async def _execute_run(self, run_id: uuid.UUID) -> None:
         """Run the pipeline in a subprocess. Fire-and-forget."""
+        self._active_runs.add(run_id)
         async with self._semaphore:
             try:
                 await self._do_execute(run_id)
@@ -85,6 +123,9 @@ class RunnerService:
             except Exception as e:
                 logger.error("Run %s failed: %s", run_id, e)
                 await self._mark_run_failed(run_id, str(e))
+            finally:
+                self._active_runs.discard(run_id)
+                await self._close_subscribers(run_id)
 
     async def _do_execute(self, run_id: uuid.UUID) -> None:
         async with self._session_factory() as session:
@@ -151,6 +192,7 @@ class RunnerService:
             ]
             if pipeline_name:
                 cmd.extend(["--pipeline", pipeline_name])
+            command_text = " ".join(shlex.quote(c) for c in cmd)
 
             started_at = datetime.now(timezone.utc)
             async with self._session_factory() as session:
@@ -159,6 +201,7 @@ class RunnerService:
                         status=RunStatus.running,
                         started_at=started_at,
                         log_path=log_path,
+                        command_text=command_text,
                     )
                 )
                 await session.commit()
@@ -176,16 +219,15 @@ class RunnerService:
                 )
                 await session.commit()
 
-            max_bytes = settings.run_log_max_bytes
             with open(log_path, "w") as log_file:
                 while True:
                     line = await proc.stdout.readline()
                     if not line:
                         break
-                    log_file.write(line.decode("utf-8", errors="replace"))
-                    if log_file.tell() > max_bytes:
-                        log_file.truncate(max_bytes // 2)
-                        log_file.seek(0, 2)
+                    text = line.decode("utf-8", errors="replace")
+                    log_file.write(text)
+                    log_file.flush()
+                    self._broadcast(run_id, text.rstrip("\n"))
 
             exit_code = await proc.wait()
             completed_at = datetime.now(timezone.utc)
