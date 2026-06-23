@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 from docupipe_manager.config import Settings
 from docupipe_manager.crypto import decrypt_sm4, encrypt_sm4
 from docupipe_manager.models.dws_credential import CredentialStatus, DwsCredential
+from sqlalchemy import not_
 from docupipe_manager.platform.client import XinyiPlatformClient
 
 logger = logging.getLogger(__name__)
@@ -219,6 +220,7 @@ class CredentialService:
             result = await db_session.execute(
                 select(DwsCredential)
                 .where(DwsCredential.project_id == project_id)
+                .where(DwsCredential.status != CredentialStatus.revoked)
                 .order_by(DwsCredential.created_at.desc())
             )
             return list(result.scalars().all())

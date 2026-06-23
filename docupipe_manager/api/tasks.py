@@ -2,7 +2,7 @@ import uuid
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 from sqlalchemy import insert, select, update
 from typing_extensions import Literal
 
@@ -55,6 +55,12 @@ class CreateTaskRequest(BaseModel):
     @classmethod
     def _v_cron(cls, v): return _validate_cron(v)
 
+    @model_validator(mode="after")
+    def _validate_credential_pair(self):
+        if (self.credential_id is None) != (self.credential_type is None):
+            raise ValueError("credential_id and credential_type must be both set or both empty")
+        return self
+
 
 class UpdateTaskRequest(BaseModel):
     name: Optional[str] = None
@@ -74,6 +80,12 @@ class UpdateTaskRequest(BaseModel):
     @field_validator("schedule_cron")
     @classmethod
     def _v_cron(cls, v): return _validate_cron(v)
+
+    @model_validator(mode="after")
+    def _validate_credential_pair(self):
+        if (self.credential_id is None) != (self.credential_type is None):
+            raise ValueError("credential_id and credential_type must be both set or both empty")
+        return self
 
 
 class TriggerRequest(BaseModel):

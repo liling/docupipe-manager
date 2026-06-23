@@ -23,7 +23,7 @@ async def list_credentials(project_id: uuid.UUID, user: dict = Depends(_require_
         {"id": str(c.id), "name": c.name, "corp_id": c.corp_id, "status": c.status.value,
          "token_expires_at": str(c.token_expires_at) if c.token_expires_at else None,
          "created_at": str(c.created_at)}
-        for c in creds if c.status != CredentialStatus.revoked
+        for c in creds
     ]
 
 

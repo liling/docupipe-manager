@@ -71,7 +71,7 @@ async function loadCredentials() {
       sessionKey = data.session_key;
       flowBox.innerHTML = `
         <p>请在浏览器中打开以下链接并输入验证码：</p>
-        <p><a href="${data.verification_uri}" target="_blank" class="link">${data.verification_uri}</a></p>
+        <p><a href="${data.verification_url}" target="_blank" class="link">${data.verification_url}</a></p>
         <p class="font-bold text-lg">验证码：<code>${data.user_code}</code></p>
         <p class="text-xs text-gray-500">有效期 ${data.expires_in || 300} 秒</p>
         <div class="flex gap-2 mt-2">
