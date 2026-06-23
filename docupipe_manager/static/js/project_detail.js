@@ -294,7 +294,7 @@ async function showEnvEditor(varId) {
     <div class="form-group"><label>变量名</label>
       <input id="env-key" class="form-control" value="${isEdit ? v.key : ""}" placeholder="如 MY_VAR" pattern="^[A-Za-z_][A-Za-z0-9_]*$"></div>
     <div class="form-group"><label>值</label>
-      <input id="env-value" class="form-control" ${valPlaceholder}></div>
+      <input id="env-value" class="form-control" value="${isEdit && !v.is_secret ? (v.value || "") : ""}" ${valPlaceholder}></div>
     <div class="form-group"><label><input type="checkbox" id="env-secret" ${secretChecked} ${secretDisabled}> 密钥（加密存储）</label></div>
     <div class="form-group"><label>说明（可选）</label>
       <input id="env-desc" class="form-control" value="${isEdit && v.description ? v.description : ""}"></div>
