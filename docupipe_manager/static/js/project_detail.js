@@ -236,7 +236,6 @@ async function loadRuns() {
 async function loadEnvVars() {
   const box = document.getElementById("tab-env-vars");
   let html = '<div style="margin-bottom:10px"><button class="btn btn-sm btn-primary" id="env-add">新增变量</button></div>';
-  html += '<div id="env-editor" class="hidden card" style="margin-bottom:10px"></div>';
   html += '<div id="env-list"></div>';
   box.innerHTML = html;
   document.getElementById("env-add").addEventListener("click", () => showEnvEditor(null));
@@ -277,8 +276,12 @@ async function refreshEnvList() {
 }
 
 async function showEnvEditor(varId) {
-  const editor = document.getElementById("env-editor");
-  editor.classList.remove("hidden");
+  let dialog = document.getElementById("env-dialog");
+  if (!dialog) {
+    dialog = document.createElement("dialog");
+    dialog.id = "env-dialog";
+    document.body.appendChild(dialog);
+  }
   let v = null;
   if (varId) {
     const r = await fetch(`/api/projects/${pid}/env-vars`);
@@ -289,20 +292,25 @@ async function showEnvEditor(varId) {
   const valPlaceholder = (isEdit && v.is_secret) ? 'placeholder="留空表示不修改"' : 'placeholder="值"';
   const secretDisabled = isEdit ? 'disabled' : '';
   const secretChecked = (isEdit && v.is_secret) ? 'checked' : '';
-  editor.innerHTML = `
-    <h3>${isEdit ? "编辑环境变量" : "新增环境变量"}</h3>
+  dialog.innerHTML = `
+    <h3 style="margin:0 0 16px">${isEdit ? "编辑环境变量" : "新增环境变量"}</h3>
     <div class="form-group"><label>变量名</label>
       <input id="env-key" class="form-control" value="${isEdit ? v.key : ""}" placeholder="如 MY_VAR" pattern="^[A-Za-z_][A-Za-z0-9_]*$"></div>
     <div class="form-group"><label>值</label>
       <input id="env-value" class="form-control" value="${isEdit && !v.is_secret ? (v.value || "") : ""}" ${valPlaceholder}></div>
-    <div class="check-row"><label><input type="checkbox" id="env-secret" ${secretChecked} ${secretDisabled}> 密钥（加密存储）</label></div>
+    <div class="check-row">
+      <input type="checkbox" id="env-secret" ${secretChecked} ${secretDisabled}>
+      <label for="env-secret">密钥（加密存储）</label>
+    </div>
     <div class="form-group"><label>说明（可选）</label>
       <input id="env-desc" class="form-control" value="${isEdit && v.description ? v.description : ""}"></div>
-    <div class="form-actions">
+    <div class="form-actions" style="margin-top:16px">
       <button class="btn btn-sm btn-primary" id="env-save">保存</button>
       <button class="btn btn-sm btn-secondary" id="env-cancel">取消</button>
     </div>`;
-  document.getElementById("env-cancel").addEventListener("click", () => editor.classList.add("hidden"));
+  dialog.showModal();
+  document.getElementById("env-cancel").addEventListener("click", () => dialog.close());
+  dialog.addEventListener("click", (e) => { if (e.target === dialog) dialog.close(); });
   document.getElementById("env-save").addEventListener("click", async () => {
     const body = {
       key: document.getElementById("env-key").value.trim(),
@@ -330,7 +338,7 @@ async function showEnvEditor(varId) {
         method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(body),
       });
     }
-    if (r.ok) { editor.classList.add("hidden"); refreshEnvList(); }
+    if (r.ok) { dialog.close(); refreshEnvList(); }
     else { const j = await r.json(); alert(j.detail || "保存失败"); }
   });
 }
