@@ -1,3 +1,4 @@
+import asyncio
 import uuid
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -181,4 +182,62 @@ async def test_stream_completed_run_reads_file(async_client, tmp_path):
         assert "event: meta" in text
         assert '"alpha"' in text and '"beta"' in text
         assert "event: end" in text
+    clear_overrides()
+
+
+@pytest.mark.asyncio
+async def test_stream_active_run_replays_history_then_live_then_end(async_client):
+    rid = uuid.uuid4()
+    run_mock = MagicMock()
+    run_mock.id = rid
+    run_mock.task_id = uuid.uuid4()
+    run_mock.trigger_type = "manual"
+    run_mock.triggered_by = None
+    run_mock.pipeline_name = None
+    run_mock.mode = "incremental"
+    run_mock.status = "running"
+    run_mock.exit_code = None
+    run_mock.command_text = "cmd"
+    run_mock.started_at = None
+    run_mock.completed_at = None
+    run_mock.log_path = "/tmp/x.log"
+    run_mock.error_message = None
+    run_mock.created_at = "2026-06-23"
+    task_mock = MagicMock()
+    task_mock.name = "t"
+    task_mock.project_id = uuid.uuid4()
+
+    q: asyncio.Queue = asyncio.Queue()
+    q.put_nowait("beta")
+    q.put_nowait(None)  # sentinel
+
+    override_get_current_user({"id": str(uuid.uuid4()), "role": "admin"})
+    with patch("docupipe_manager.main.app") as mock_app:
+        mock_conn = AsyncMock()
+        mock_conn.execute = AsyncMock(side_effect=[
+            MagicMock(scalar_one_or_none=MagicMock(return_value=run_mock)),  # access
+            MagicMock(scalar_one_or_none=MagicMock(return_value=run_mock)),  # detail(meta)
+            MagicMock(scalar_one_or_none=MagicMock(return_value=task_mock)),
+            MagicMock(scalar_one_or_none=MagicMock(return_value=run_mock)),  # detail(end)
+            MagicMock(scalar_one_or_none=MagicMock(return_value=task_mock)),
+        ])
+        mock_engine = MagicMock()
+        mock_engine.begin.return_value.__aenter__ = AsyncMock(return_value=mock_conn)
+        mock_engine.begin.return_value.__aexit__ = AsyncMock(return_value=None)
+        mock_app.state.engine = mock_engine
+
+        runner = MagicMock()
+        runner.is_active = MagicMock(return_value=True)
+        runner.subscribe = MagicMock(return_value=(["alpha"], q))
+        runner.unsubscribe = MagicMock()
+        mock_app.state.runner = runner
+
+        r = await async_client.get(f"/api/runs/{rid}/stream")
+        assert r.status_code == 200
+        text = r.text
+        assert "event: meta" in text
+        assert '"alpha"' in text  # history replay
+        assert '"beta"' in text   # live line from queue
+        assert "event: end" in text
+        runner.unsubscribe.assert_called_once_with(rid, q)
     clear_overrides()
