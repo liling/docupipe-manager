@@ -128,6 +128,7 @@ async def test_close_subscribers_sends_sentinel_and_cleans(runner_service):
 async def test_execute_run_marks_active_and_closes_on_success(runner_service):
     rid = uuid.uuid4()
     runner_service._do_execute = AsyncMock()
+    runner_service._active_runs.add(rid)
     _, queue = runner_service.subscribe(rid)  # 预先订阅
     await runner_service._execute_run(rid)
     assert not runner_service.is_active(rid)
@@ -140,6 +141,7 @@ async def test_execute_run_closes_subscribers_on_exception(runner_service):
     rid = uuid.uuid4()
     runner_service._do_execute = AsyncMock(side_effect=RuntimeError("boom"))
     runner_service._mark_run_failed = AsyncMock()
+    runner_service._active_runs.add(rid)
     _, queue = runner_service.subscribe(rid)
     await runner_service._execute_run(rid)
     assert queue.get_nowait() is None
