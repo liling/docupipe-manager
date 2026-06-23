@@ -4,6 +4,7 @@ from docupipe_manager.models.project_member import ProjectMember
 from docupipe_manager.models.task import Task, TaskStatus, CredentialType
 from docupipe_manager.models.dws_credential import DwsCredential, CredentialStatus
 from docupipe_manager.models.pipeline_run import PipelineRun
+from docupipe_manager.models.project_env_var import ProjectEnvVar
 
 
 def test_models_importable():
@@ -34,3 +35,18 @@ def test_task_has_credential_polymorphic_fields():
     cols = Task.__table__.columns
     assert "credential_id" in cols
     assert "credential_type" in cols
+
+
+def test_project_env_var_mapping():
+    assert ProjectEnvVar.__tablename__ == "project_env_vars"
+    cols = ProjectEnvVar.__table__.columns
+    assert "id" in cols
+    assert "project_id" in cols
+    assert "key" in cols
+    assert "value" in cols
+    assert "is_secret" in cols
+    assert "description" in cols
+    assert "created_by" in cols
+    assert "created_at" in cols
+    assert "updated_at" in cols
+    assert cols["is_secret"].default is not None
