@@ -92,7 +92,7 @@ async def test_create_duplicate_key_conflict(async_client):
 
 
 @pytest.mark.asyncio
-async def test_update_secret_empty_value_keeps_original(async_client):
+async def test_update_secret_without_value_field_keeps_original(async_client):
     override_get_current_user({"id": str(uuid.uuid4()), "role": "admin"})
     pid = uuid.uuid4()
     var_id = uuid.uuid4()
@@ -101,6 +101,34 @@ async def test_update_secret_empty_value_keeps_original(async_client):
         with patch("docupipe_manager.api.env_vars._get_engine", return_value=_mock_engine(fetchone_row=current)):
             r = await async_client.put(f"/api/projects/{pid}/env-vars/{var_id}",
                                        json={"description": "new desc"})
+            assert r.status_code == 200
+    clear_overrides()
+
+
+@pytest.mark.asyncio
+async def test_update_secret_with_empty_value_keeps_original(async_client):
+    override_get_current_user({"id": str(uuid.uuid4()), "role": "admin"})
+    pid = uuid.uuid4()
+    var_id = uuid.uuid4()
+    current = _row(id=var_id, key="BAR", value="ciphertext", is_secret=True)
+    with patch("docupipe_manager.api.env_vars._require_access_async", new=AsyncMock(return_value={"role": "admin"})):
+        with patch("docupipe_manager.api.env_vars._get_engine", return_value=_mock_engine(fetchone_row=current)):
+            r = await async_client.put(f"/api/projects/{pid}/env-vars/{var_id}",
+                                       json={"value": ""})
+            assert r.status_code == 200
+    clear_overrides()
+
+
+@pytest.mark.asyncio
+async def test_update_nonsecret_with_null_value_keeps_original(async_client):
+    override_get_current_user({"id": str(uuid.uuid4()), "role": "admin"})
+    pid = uuid.uuid4()
+    var_id = uuid.uuid4()
+    current = _row(id=var_id, key="FOO", value="plain", is_secret=False)
+    with patch("docupipe_manager.api.env_vars._require_access_async", new=AsyncMock(return_value={"role": "admin"})):
+        with patch("docupipe_manager.api.env_vars._get_engine", return_value=_mock_engine(fetchone_row=current)):
+            r = await async_client.put(f"/api/projects/{pid}/env-vars/{var_id}",
+                                       json={"value": None})
             assert r.status_code == 200
     clear_overrides()
 
