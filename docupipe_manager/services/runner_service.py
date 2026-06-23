@@ -138,17 +138,16 @@ class RunnerService:
             if task is None:
                 await self._mark_run_failed(run_id, "Task not found")
                 return
-            if task.credential_id is None or task.credential_type is None:
-                await self._mark_run_failed(run_id, "Task has no credential bound")
-                return
-            if task.credential_type == CredentialType.dws:
-                credential = await session.get(DwsCredential, task.credential_id)
-            else:
-                await self._mark_run_failed(run_id, f"Unsupported credential type: {task.credential_type}")
-                return
-            if credential is None:
-                await self._mark_run_failed(run_id, "Credential not found")
-                return
+            credential = None
+            if task.credential_id is not None and task.credential_type is not None:
+                if task.credential_type == CredentialType.dws:
+                    credential = await session.get(DwsCredential, task.credential_id)
+                else:
+                    await self._mark_run_failed(run_id, f"Unsupported credential type: {task.credential_type}")
+                    return
+                if credential is None:
+                    await self._mark_run_failed(run_id, "Credential not found")
+                    return
 
             config_yaml = task.config_yaml
             slug = task.slug
@@ -171,19 +170,20 @@ class RunnerService:
 
         home_dir = mkdtemp(prefix="dws-home-")
         try:
-            key_hex = settings.encryption_key
-            auth_b64 = decrypt_sm4(credential.auth_blob.hex(), key_hex)
+            if credential is not None:
+                key_hex = settings.encryption_key
+                auth_b64 = decrypt_sm4(credential.auth_blob.hex(), key_hex)
 
-            auth_path = os.path.join(home_dir, "auth.b64")
-            with open(auth_path, "w") as f:
-                f.write(auth_b64)
+                auth_path = os.path.join(home_dir, "auth.b64")
+                with open(auth_path, "w") as f:
+                    f.write(auth_b64)
 
-            import_proc = await asyncio.create_subprocess_exec(
-                settings.dws_cli_path, "auth", "import", "-i", auth_path, "--base64",
-                stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
-                env={**os.environ, "HOME": home_dir},
-            )
-            await import_proc.communicate()
+                import_proc = await asyncio.create_subprocess_exec(
+                    settings.dws_cli_path, "auth", "import", "-i", auth_path, "--base64",
+                    stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+                    env={**os.environ, "HOME": home_dir},
+                )
+                await import_proc.communicate()
 
             cmd = [
                 settings.docupipe_python, "-m", "docupipe", "run",

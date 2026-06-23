@@ -299,3 +299,64 @@ async def test_do_execute_truncates_log_file_at_max_bytes(runner_service, tmp_pa
     with open(log_path, "rb") as f:
         content = f.read()
     assert len(content) <= 64
+
+
+@pytest.mark.asyncio
+async def test_do_execute_runs_without_credential(runner_service, tmp_path):
+    """task 未绑定 credential 时仍能正常执行：跳过 auth import，但仍建临时 HOME、记录 command_text。"""
+    rid = uuid.uuid4()
+    runner_service._active_runs.add(rid)
+    task_id = uuid.uuid4()
+
+    run_mock = MagicMock()
+    run_mock.id = rid
+    run_mock.task_id = task_id
+    run_mock.mode = "incremental"
+    run_mock.pipeline_name = None
+    task_mock = MagicMock()
+    task_mock.id = task_id
+    task_mock.credential_id = None       # 未绑定 credential
+    task_mock.credential_type = None
+    task_mock.config_yaml = "k: v"
+    task_mock.slug = "demo"
+
+    sessions = [MagicMock(), MagicMock(), MagicMock(), MagicMock()]
+    idx = {"i": 0}
+
+    def fake_factory():
+        s = sessions[idx["i"]]
+        idx["i"] += 1
+        cm = MagicMock()
+        cm.__aenter__ = AsyncMock(return_value=s)
+        cm.__aexit__ = AsyncMock(return_value=None)
+        return cm
+
+    # session 0: get(run)->run_mock, get(task)->task_mock（无 cred get）
+    sessions[0].get = AsyncMock(side_effect=[run_mock, task_mock])
+    sessions[1].execute = AsyncMock()
+    sessions[1].commit = AsyncMock()
+    sessions[2].execute = AsyncMock()
+    sessions[2].commit = AsyncMock()
+    sessions[3].execute = AsyncMock()
+    sessions[3].commit = AsyncMock()
+    runner_service._session_factory = fake_factory
+    runner_service._settings.data_dir = str(tmp_path)
+
+    with patch("docupipe_manager.services.runner_service.mkdtemp", return_value=str(tmp_path)), \
+         patch("asyncio.create_subprocess_exec", new=AsyncMock()) as mock_sub:
+        proc = MagicMock()
+        proc.stdout.readline = AsyncMock(side_effect=[b"hello\n", b""])
+        proc.wait = AsyncMock(return_value=0)
+        proc.pid = 999
+        mock_sub.side_effect = [proc]  # 仅 docupipe run，无 auth import 子进程
+
+        _, queue = runner_service.subscribe(rid)
+        await runner_service._do_execute(rid)
+
+    # 仅启动了 docupipe run 子进程，未做 auth import
+    assert mock_sub.call_count == 1
+    # 输出被广播
+    assert queue.get_nowait() == "hello"
+    # command_text 已持久化在 running 的 update 里
+    update_call = sessions[1].execute.call_args[0][0]
+    assert "command_text" in str(update_call.compile())
