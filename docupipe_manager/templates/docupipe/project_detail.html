@@ -55,11 +55,18 @@
   {% endif %}
 </div>
 <script>
-document.querySelectorAll(".tab").forEach(b => b.addEventListener("click", () => {
+function activateTab(name) {
+  const btn = document.querySelector(`.tab[data-tab="${name}"]`);
+  if (!btn) name = "tasks";
   document.querySelectorAll(".tab").forEach(x => x.classList.remove("tab-active"));
   document.querySelectorAll(".tab-panel").forEach(x => x.classList.add("hidden"));
-  b.classList.add("tab-active");
-  document.getElementById("tab-" + b.dataset.tab).classList.remove("hidden");
+  document.querySelector(`.tab[data-tab="${name}"]`).classList.add("tab-active");
+  document.getElementById("tab-" + name).classList.remove("hidden");
+}
+activateTab((location.hash || "#tasks").slice(1));
+document.querySelectorAll(".tab").forEach(b => b.addEventListener("click", () => {
+  activateTab(b.dataset.tab);
+  location.hash = b.dataset.tab;
 }));
 </script>
 {% endblock %}

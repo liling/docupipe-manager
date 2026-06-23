@@ -34,7 +34,7 @@ function renderMeta(m) {
   dl.href = `/api/runs/${runId}/download-log`;
   const cancelBtn = document.getElementById("run-cancel");
   if (m.project_id) {
-    document.getElementById("run-back").href = `/docupipe/projects/${m.project_id}`;
+    document.getElementById("run-back").href = `/docupipe/projects/${m.project_id}#runs`;
   }
   if (m.status === "running" || m.status === "pending") {
     cancelBtn.classList.remove("hidden");
