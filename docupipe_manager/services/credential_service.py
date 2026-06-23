@@ -28,7 +28,7 @@ class CredentialService:
         self._session_factory = async_sessionmaker(engine, expire_on_commit=False)
         self._active_sessions: dict[str, dict] = {}
 
-    async def start_device_login(self, name: str) -> dict:
+    async def start_device_login(self, project_id: uuid.UUID, name: str) -> dict:
         """Start dws auth login --device, return verification_url + user_code + session_key."""
         session_key = uuid.uuid4().hex
         home_dir = mkdtemp(prefix="dws-device-")
@@ -53,6 +53,7 @@ class CredentialService:
             "proc": proc,
             "home_dir": home_dir,
             "name": name,
+            "project_id": project_id,
             "created_at": time.monotonic(),
         }
 
@@ -83,7 +84,7 @@ class CredentialService:
         session["result"] = result
         return {"status": "success", "result": result}
 
-    async def finalize_login(self, session_key: str, name: str, user_id: uuid.UUID) -> DwsCredential:
+    async def finalize_login(self, session_key: str, name: str, user_id: uuid.UUID, project_id: uuid.UUID) -> DwsCredential:
         """Complete login: read dws status, export auth blob, SM4 encrypt, store in DB."""
         session = self._active_sessions.get(session_key)
         if session is None:
@@ -129,6 +130,7 @@ class CredentialService:
             refresh_token_expires_at=None,
             status=CredentialStatus.active,
             created_by=user_id,
+            project_id=project_id,
         )
 
         async with self._session_factory() as db_session:
@@ -146,11 +148,11 @@ class CredentialService:
 
         return credential
 
-    async def check_status(self, credential_id: uuid.UUID) -> dict:
+    async def check_status(self, credential_id: uuid.UUID, project_id: uuid.UUID) -> dict:
         """Read credential from DB and check dws auth status in a temp HOME."""
         async with self._session_factory() as db_session:
             credential = await db_session.get(DwsCredential, credential_id)
-            if credential is None:
+            if credential is None or credential.project_id != project_id:
                 raise ValueError("Credential not found")
 
         key_hex = self._settings.encryption_key
@@ -181,11 +183,11 @@ class CredentialService:
 
         return status_data
 
-    async def revoke(self, credential_id: uuid.UUID, user_id: uuid.UUID) -> None:
+    async def revoke(self, credential_id: uuid.UUID, user_id: uuid.UUID, project_id: uuid.UUID) -> None:
         """Mark credential as revoked (soft delete)."""
         async with self._session_factory() as db_session:
             credential = await db_session.get(DwsCredential, credential_id)
-            if credential is None:
+            if credential is None or credential.project_id != project_id:
                 raise ValueError("Credential not found")
             credential.status = CredentialStatus.revoked
             await db_session.commit()
@@ -212,9 +214,11 @@ class CredentialService:
             logger.info("Cleaning up expired device session %s", key)
             self._cleanup_session(key)
 
-    async def list_credentials(self) -> list[DwsCredential]:
+    async def list_credentials(self, project_id: uuid.UUID) -> list[DwsCredential]:
         async with self._session_factory() as db_session:
             result = await db_session.execute(
-                select(DwsCredential).order_by(DwsCredential.created_at.desc())
+                select(DwsCredential)
+                .where(DwsCredential.project_id == project_id)
+                .order_by(DwsCredential.created_at.desc())
             )
             return list(result.scalars().all())
