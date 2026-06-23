@@ -2,37 +2,83 @@ import uuid
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel
 
-from docupipe_manager.auth.dependencies import require_admin
-from docupipe_manager.models.pipeline_run import RunStatus
+from docupipe_manager.api.projects import _get_engine
+from docupipe_manager.auth.dependencies import get_current_user
 
-router = APIRouter(prefix="/admin/api/docupipe/runs", tags=["runs"])
+router = APIRouter(prefix="/api/runs", tags=["runs"])
 
 MAX_TAIL_LINES = 1000
 
 
+async def _verify_run_access(run_id: uuid.UUID, user: dict):
+    from sqlalchemy import select, text
+    from docupipe_manager.models.pipeline_run import PipelineRun
+
+    engine = _get_engine()
+    async with engine.begin() as conn:
+        result = await conn.execute(
+            select(PipelineRun).where(PipelineRun.id == run_id)
+        )
+        run = result.scalar_one_or_none()
+    if run is None:
+        raise HTTPException(status_code=404, detail="Run not found")
+
+    if user.get("role") != "admin":
+        async with engine.begin() as conn:
+            row = await conn.execute(text("""
+                SELECT 1 FROM docupipe_manager.tasks t
+                JOIN docupipe_manager.projects p ON p.id = t.project_id
+                WHERE t.id = :tid AND (
+                    p.owner_id = :uid
+                    OR p.id IN (
+                        SELECT pm.project_id FROM docupipe_manager.project_members pm WHERE pm.user_id = :uid
+                    )
+                )
+            """), {"tid": str(run.task_id), "uid": user["id"]})
+            if not row.fetchone():
+                raise HTTPException(status_code=404, detail="Run not found")
+
+    return run
+
+
 @router.get("")
 async def list_runs(
-    project_id: Optional[uuid.UUID] = None,
+    task_id: Optional[uuid.UUID] = None,
     status: Optional[str] = None,
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
-    user: dict = Depends(require_admin),
+    user: dict = Depends(get_current_user),
 ):
-    from docupipe_manager.main import app
-    from sqlalchemy import select, func, text
+    from sqlalchemy import func, select, text
     from docupipe_manager.models.pipeline_run import PipelineRun
 
+    engine = _get_engine()
+
     conditions = []
-    if project_id:
-        conditions.append(PipelineRun.project_id == project_id)
+    if task_id:
+        conditions.append(PipelineRun.task_id == task_id)
     if status:
         conditions.append(PipelineRun.status == status)
 
     offset = (page - 1) * page_size
 
-    async with app.state.engine.begin() as conn:
+    async with engine.begin() as conn:
+        if user.get("role") != "admin":
+            visible_tasks = [
+                r[0] for r in (await conn.execute(text("""
+                    SELECT t.id FROM docupipe_manager.tasks t
+                    WHERE t.project_id IN (
+                        SELECT id FROM docupipe_manager.projects WHERE owner_id = :uid AND status != 'archived'
+                        UNION
+                        SELECT pm.project_id FROM docupipe_manager.project_members pm WHERE pm.user_id = :uid
+                    )
+                """), {"uid": user["id"]})).fetchall()
+            ]
+            if not visible_tasks:
+                return {"total": 0, "page": page, "page_size": page_size, "runs": []}
+            conditions.append(PipelineRun.task_id.in_(visible_tasks))
+
         count_q = select(func.count()).select_from(PipelineRun)
         if conditions:
             count_q = count_q.where(*conditions)
@@ -51,7 +97,7 @@ async def list_runs(
         "runs": [
             {
                 "id": str(r.id),
-                "project_id": str(r.project_id),
+                "task_id": str(r.task_id),
                 "trigger_type": r.trigger_type.value if hasattr(r.trigger_type, "value") else r.trigger_type,
                 "pipeline_name": r.pipeline_name,
                 "mode": r.mode,
@@ -68,23 +114,13 @@ async def list_runs(
 @router.get("/{run_id}")
 async def get_run(
     run_id: uuid.UUID,
-    user: dict = Depends(require_admin),
+    user: dict = Depends(get_current_user),
 ):
-    from docupipe_manager.main import app
-    from sqlalchemy import select
-    from docupipe_manager.models.pipeline_run import PipelineRun
-
-    async with app.state.engine.begin() as conn:
-        result = await conn.execute(
-            select(PipelineRun).where(PipelineRun.id == run_id)
-        )
-        run = result.scalar_one_or_none()
-        if run is None:
-            raise HTTPException(status_code=404, detail="Run not found")
+    run = await _verify_run_access(run_id, user)
 
     return {
         "id": str(run.id),
-        "project_id": str(run.project_id),
+        "task_id": str(run.task_id),
         "trigger_type": run.trigger_type.value if hasattr(run.trigger_type, "value") else run.trigger_type,
         "triggered_by": str(run.triggered_by) if run.triggered_by else None,
         "pipeline_name": run.pipeline_name,
@@ -103,19 +139,9 @@ async def get_run(
 async def get_run_log(
     run_id: uuid.UUID,
     tail: int = Query(200, ge=1, le=MAX_TAIL_LINES),
-    user: dict = Depends(require_admin),
+    user: dict = Depends(get_current_user),
 ):
-    from docupipe_manager.main import app
-    from sqlalchemy import select
-    from docupipe_manager.models.pipeline_run import PipelineRun
-
-    async with app.state.engine.begin() as conn:
-        result = await conn.execute(
-            select(PipelineRun).where(PipelineRun.id == run_id)
-        )
-        run = result.scalar_one_or_none()
-        if run is None:
-            raise HTTPException(status_code=404, detail="Run not found")
+    run = await _verify_run_access(run_id, user)
 
     if not run.log_path:
         return {"lines": [], "truncated": False, "total_bytes": 0}
@@ -138,20 +164,11 @@ async def get_run_log(
 @router.get("/{run_id}/download-log")
 async def download_run_log(
     run_id: uuid.UUID,
-    user: dict = Depends(require_admin),
+    user: dict = Depends(get_current_user),
 ):
-    from docupipe_manager.main import app
     from fastapi.responses import FileResponse
-    from sqlalchemy import select
-    from docupipe_manager.models.pipeline_run import PipelineRun
 
-    async with app.state.engine.begin() as conn:
-        result = await conn.execute(
-            select(PipelineRun).where(PipelineRun.id == run_id)
-        )
-        run = result.scalar_one_or_none()
-        if run is None:
-            raise HTTPException(status_code=404, detail="Run not found")
+    run = await _verify_run_access(run_id, user)
 
     if not run.log_path:
         raise HTTPException(status_code=404, detail="Log file not found")
@@ -162,8 +179,10 @@ async def download_run_log(
 @router.post("/{run_id}/cancel")
 async def cancel_run(
     run_id: uuid.UUID,
-    user: dict = Depends(require_admin),
+    user: dict = Depends(get_current_user),
 ):
+    await _verify_run_access(run_id, user)
+
     from docupipe_manager.main import app
     try:
         await app.state.runner.cancel_run(run_id)
