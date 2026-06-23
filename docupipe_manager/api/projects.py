@@ -2,258 +2,159 @@ import uuid
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel, Field, field_validator
-from typing_extensions import Literal
+from pydantic import BaseModel, Field
 
-from docupipe_manager.auth.dependencies import require_admin
-from docupipe_manager.models.docupipe_project import ProjectStatus
-from docupipe_manager.models.dws_credential import CredentialStatus
+from docupipe_manager.auth.dependencies import get_current_user, require_admin
+from docupipe_manager.models.project import Project, ProjectStatus
 
-router = APIRouter(prefix="/admin/api/docupipe/projects", tags=["projects"])
+admin_router = APIRouter(prefix="/admin/api/projects", tags=["projects"])
+router = APIRouter(prefix="/api/projects", tags=["projects"])
 
 
 class CreateProjectRequest(BaseModel):
     name: str = Field(..., min_length=1, max_length=255)
     slug: str = Field(..., min_length=1, max_length=64, pattern=r"^[a-z0-9-]+$")
     description: Optional[str] = None
-    config_yaml: str
-    dws_credential_id: str
-    schedule_cron: Optional[str] = None
-    schedule_enabled: bool = True
-    schedule_pipeline: Optional[str] = None
-    schedule_mode: Literal["full", "incremental", "mirror"] = "incremental"
-
-    @field_validator("config_yaml")
-    @classmethod
-    def validate_yaml(cls, v: str) -> str:
-        import yaml
-        if not v.strip():
-            raise ValueError("config_yaml must not be empty")
-        try:
-            parsed = yaml.safe_load(v)
-        except yaml.YAMLError as e:
-            raise ValueError(f"Invalid YAML: {e}")
-        if not isinstance(parsed, dict):
-            raise ValueError("YAML must be a mapping (dict)")
-        pipelines = parsed.get("pipelines")
-        if pipelines is None or not isinstance(pipelines, list):
-            raise ValueError("YAML must contain a 'pipelines' key with a list value")
-        return v
-
-    @field_validator("schedule_cron")
-    @classmethod
-    def validate_cron(cls, v: Optional[str]) -> Optional[str]:
-        if v:
-            from croniter import croniter
-            if not croniter.is_valid(v):
-                raise ValueError(f"Invalid cron expression: {v}")
-        return v
 
 
 class UpdateProjectRequest(BaseModel):
     name: Optional[str] = Field(None, min_length=1, max_length=255)
     description: Optional[str] = None
-    config_yaml: Optional[str] = None
-    dws_credential_id: Optional[str] = None
-    schedule_cron: Optional[str] = None
-    schedule_enabled: Optional[bool] = None
-    schedule_pipeline: Optional[str] = None
-    schedule_mode: Optional[Literal["full", "incremental", "mirror"]] = None
+    status: Optional[str] = None
 
 
-class TriggerRunRequest(BaseModel):
-    pipeline_name: Optional[str] = None
-    mode: Optional[Literal["full", "incremental", "mirror"]] = None
-
-
-ProjectStatusLiteral = Literal["active", "paused", "archived"]
-
-@router.get("")
-async def list_projects(
-    user: dict = Depends(require_admin),
-):
+def _get_engine():
     from docupipe_manager.main import app
-    from sqlalchemy import select, text
-
-    async with app.state.engine.begin() as conn:
-        projects = (await conn.execute(text("""
-            SELECT p.id, p.name, p.slug, p.schedule_cron, p.schedule_enabled,
-                   p.schedule_pipeline, p.schedule_mode, p.status, p.dws_credential_id,
-                   c.name as credential_name,
-                   (SELECT status FROM docupipe_manager.pipeline_runs
-                    WHERE project_id = p.id ORDER BY created_at DESC LIMIT 1) as last_run_status
-            FROM docupipe_manager.docupipe_projects p
-            LEFT JOIN docupipe_manager.dws_credentials c ON c.id = p.dws_credential_id
-            ORDER BY p.created_at DESC
-        """))).fetchall()
-
-    return [
-        {
-            "id": str(r.id), "name": r.name, "slug": r.slug,
-            "schedule_cron": r.schedule_cron,
-            "schedule_enabled": r.schedule_enabled,
-            "schedule_pipeline": r.schedule_pipeline,
-            "schedule_mode": r.schedule_mode,
-            "status": r.status,
-            "credential_name": r.credential_name,
-            "last_run_status": r.last_run_status,
-        }
-        for r in projects
-    ]
+    return app.state.engine
 
 
-@router.post("")
-async def create_project(
-    body: CreateProjectRequest,
-    user: dict = Depends(require_admin),
-):
-    from docupipe_manager.main import app
-    from docupipe_manager.models.docupipe_project import DocupipeProject
-    from docupipe_manager.models.dws_credential import DwsCredential
+async def _require_access_async(project_id: uuid.UUID, user: dict = Depends(get_current_user)) -> dict:
+    from docupipe_manager.auth.project_access import is_project_member, is_project_owner
+    if user.get("role") == "admin":
+        return user
+    if await is_project_owner(project_id, user) or await is_project_member(project_id, user):
+        return user
+    from sqlalchemy import text
+    async with _get_engine().begin() as conn:
+        exists = (await conn.execute(
+            text("SELECT 1 FROM docupipe_manager.projects WHERE id = :pid AND status != 'archived'"),
+            {"pid": str(project_id)},
+        )).fetchone()
+    raise HTTPException(status_code=404 if exists is None else 403,
+                        detail="Project not found" if exists is None else "Not a project member")
 
-    async with app.state.engine.begin() as conn:
-        from sqlalchemy import select, text
-        result = await conn.execute(
-            select(DwsCredential).where(
-                DwsCredential.id == uuid.UUID(body.dws_credential_id),
-                DwsCredential.status == CredentialStatus.active,
-            )
-        )
-        cred = result.scalar_one_or_none()
-        if cred is None:
-            raise HTTPException(status_code=400, detail="DWS credential not found or not active")
 
-        project = DocupipeProject(
-            name=body.name,
-            slug=body.slug,
-            description=body.description,
-            config_yaml=body.config_yaml,
-            dws_credential_id=uuid.UUID(body.dws_credential_id),
-            schedule_cron=body.schedule_cron,
-            schedule_enabled=body.schedule_enabled,
-            schedule_pipeline=body.schedule_pipeline,
-            schedule_mode=body.schedule_mode,
-            created_by=uuid.UUID(user["id"]),
+async def _require_owner_async(project_id: uuid.UUID, user: dict = Depends(get_current_user)) -> dict:
+    from docupipe_manager.auth.project_access import is_project_owner
+    if await is_project_owner(project_id, user):
+        return user
+    from sqlalchemy import text
+    async with _get_engine().begin() as conn:
+        exists = (await conn.execute(
+            text("SELECT 1 FROM docupipe_manager.projects WHERE id = :pid AND status != 'archived'"),
+            {"pid": str(project_id)},
+        )).fetchone()
+    raise HTTPException(status_code=404 if exists is None else 403,
+                        detail="Project not found" if exists is None else "Project owner required")
+
+
+def _project_dict(row, include_owner=False, current_user=None) -> dict:
+    d = {
+        "id": str(row.id), "name": row.name, "slug": row.slug,
+        "description": row.description,
+        "status": row.status.value if hasattr(row.status, "value") else row.status,
+        "created_at": str(row.created_at),
+    }
+    if include_owner and current_user is not None:
+        d["is_owner"] = (str(row.owner_id) == current_user["id"]) or current_user.get("role") == "admin"
+        d["can_manage_members"] = bool(d["is_owner"])
+    return d
+
+
+@admin_router.post("")
+async def create_project(body: CreateProjectRequest, user: dict = Depends(require_admin)):
+    from sqlalchemy import select
+    engine = _get_engine()
+    async with engine.begin() as conn:
+        existing = (await conn.execute(select(Project).where(
+            (Project.slug == body.slug) | (Project.name == body.name)
+        ))).fetchone()
+        if existing:
+            raise HTTPException(status_code=409, detail="Project name or slug already exists")
+        project = Project(
+            name=body.name, slug=body.slug, description=body.description,
+            owner_id=uuid.UUID(user["id"]),
         )
         conn.add(project)
         await conn.flush()
-        project_id = project.id
+        pid = project.id
+    return {"id": str(pid)}
 
-    if body.schedule_cron:
-        await app.state.scheduler.schedule_project(project_id)
 
-    return {"id": str(project_id)}
+@router.get("")
+async def list_projects(user: dict = Depends(get_current_user)):
+    """admin 看全部；普通用户看自己 Member 的项目（未归档）。"""
+    from sqlalchemy import select, text
+    engine = _get_engine()
+    async with engine.begin() as conn:
+        if user.get("role") == "admin":
+            rows = (await conn.execute(
+                select(Project).where(Project.status != ProjectStatus.archived)
+                .order_by(Project.created_at.desc())
+            )).fetchall()
+        else:
+            rows = (await conn.execute(text("""
+                SELECT p.* FROM docupipe_manager.projects p
+                JOIN docupipe_manager.project_members m ON m.project_id = p.id
+                WHERE m.user_id = :uid AND p.status != 'archived'
+                ORDER BY p.created_at DESC
+            """), {"uid": user["id"]})).fetchall()
+    return [_project_dict(r) for r in rows]
 
 
 @router.get("/{project_id}")
-async def get_project(
-    project_id: uuid.UUID,
-    user: dict = Depends(require_admin),
-):
-    from docupipe_manager.main import app
+async def get_project(project_id: uuid.UUID, user: dict = Depends(_require_access_async)):
     from sqlalchemy import select
-    from docupipe_manager.models.docupipe_project import DocupipeProject
-
-    async with app.state.engine.begin() as conn:
-        result = await conn.execute(
-            select(DocupipeProject).where(DocupipeProject.id == project_id)
-        )
-        project = result.scalar_one_or_none()
-        if project is None:
-            raise HTTPException(status_code=404, detail="Project not found")
-    return {
-        "id": str(project.id),
-        "name": project.name,
-        "slug": project.slug,
-        "description": project.description,
-        "config_yaml": project.config_yaml,
-        "dws_credential_id": str(project.dws_credential_id),
-        "schedule_cron": project.schedule_cron,
-        "schedule_enabled": project.schedule_enabled,
-        "schedule_pipeline": project.schedule_pipeline,
-        "schedule_mode": project.schedule_mode,
-        "status": project.status.value,
-    }
+    engine = _get_engine()
+    async with engine.begin() as conn:
+        row = (await conn.execute(select(Project).where(Project.id == project_id))).fetchone()
+    if row is None:
+        raise HTTPException(status_code=404, detail="Project not found")
+    return _project_dict(row, include_owner=True, current_user=user)
 
 
 @router.put("/{project_id}")
-async def update_project(
-    project_id: uuid.UUID,
-    body: UpdateProjectRequest,
-    user: dict = Depends(require_admin),
-):
-    from docupipe_manager.main import app
-    from docupipe_manager.models.docupipe_project import DocupipeProject
+async def update_project(project_id: uuid.UUID, body: UpdateProjectRequest,
+                         user: dict = Depends(_require_access_async)):
     from sqlalchemy import select
-
-    async with app.state.engine.begin() as session:
-        result = await session.execute(
-            select(DocupipeProject).where(DocupipeProject.id == project_id)
-        )
-        project = result.scalar_one_or_none()
-        if project is None:
+    engine = _get_engine()
+    async with engine.begin() as conn:
+        row = (await conn.execute(select(Project).where(Project.id == project_id))).fetchone()
+        if row is None:
             raise HTTPException(status_code=404, detail="Project not found")
-
-        update_data = body.model_dump(exclude_unset=True)
-        for key, value in update_data.items():
-            setattr(project, key, value)
-        await session.flush()
-
-    if any(k in update_data for k in ("schedule_cron", "schedule_enabled", "status")):
-        if update_data.get("schedule_cron"):
-            await app.state.scheduler.schedule_project(project_id)
-        else:
-            await app.state.scheduler.unschedule_project(project_id)
-
+        data = body.model_dump(exclude_unset=True)
+        if "status" in data and data["status"] not in ("active", "paused"):
+            raise HTTPException(status_code=400, detail="status must be active or paused")
+        await conn.execute(
+            Project.__table__.update().where(Project.id == project_id).values(**data)
+        )
     return {"status": "updated"}
 
 
-@router.delete("/{project_id}")
-async def archive_project(
-    project_id: uuid.UUID,
-    user: dict = Depends(require_admin),
-):
-    from docupipe_manager.main import app
-    from docupipe_manager.models.docupipe_project import DocupipeProject
-    from sqlalchemy import select
-
-    async with app.state.engine.begin() as session:
-        result = await session.execute(
-            select(DocupipeProject).where(DocupipeProject.id == project_id)
-        )
-        project = result.scalar_one_or_none()
-        if project is None:
+@admin_router.delete("/{project_id}")
+async def archive_project(project_id: uuid.UUID, user: dict = Depends(_require_owner_async)):
+    """归档项目（owner/admin）+ 取消所有任务调度。"""
+    from sqlalchemy import select, update, text
+    engine = _get_engine()
+    async with engine.begin() as conn:
+        row = (await conn.execute(select(Project).where(Project.id == project_id))).fetchone()
+        if row is None:
             raise HTTPException(status_code=404, detail="Project not found")
-        project.status = ProjectStatus.archived
-        await session.flush()
-
-    await app.state.scheduler.unschedule_project(project_id)
+        await conn.execute(update(Project).where(Project.id == project_id).values(status=ProjectStatus.archived))
+        task_ids = [r.id for r in (await conn.execute(
+            text("SELECT id FROM docupipe_manager.tasks WHERE project_id = :pid"), {"pid": str(project_id)}
+        )).fetchall()]
+    from docupipe_manager.main import app
+    for tid in task_ids:
+        await app.state.scheduler.unschedule_task(tid)
     return {"status": "archived"}
-
-
-@router.post("/{project_id}/trigger")
-async def trigger_run(
-    project_id: uuid.UUID,
-    body: TriggerRunRequest,
-    user: dict = Depends(require_admin),
-):
-    from docupipe_manager.main import app
-    from docupipe_manager.models.docupipe_project import DocupipeProject
-    from sqlalchemy import select
-
-    async with app.state.engine.begin() as session:
-        result = await session.execute(
-            select(DocupipeProject).where(DocupipeProject.id == project_id)
-        )
-        project = result.scalar_one_or_none()
-        if project is None:
-            raise HTTPException(status_code=404, detail="Project not found")
-
-    run = await app.state.runner.start_run(
-        project_id=project_id,
-        trigger_type="manual",
-        triggered_by=uuid.UUID(user["id"]),
-        pipeline_name=body.pipeline_name or project.schedule_pipeline,
-        mode=body.mode or project.schedule_mode,
-    )
-    return {"run_id": str(run.id), "status": run.status.value}
