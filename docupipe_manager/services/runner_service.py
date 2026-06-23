@@ -16,6 +16,7 @@ from docupipe_manager.config import Settings
 from docupipe_manager.crypto import decrypt_sm4
 from docupipe_manager.models.dws_credential import DwsCredential
 from docupipe_manager.models.pipeline_run import PipelineRun, RunStatus
+from docupipe_manager.models.project_env_var import ProjectEnvVar
 from docupipe_manager.models.task import CredentialType, Task
 from docupipe_manager.platform.client import XinyiPlatformClient
 
@@ -155,7 +156,24 @@ class RunnerService:
             pipeline_name = run.pipeline_name
             cred_type = task.credential_type
 
+            env_var_rows = (await session.execute(
+                select(ProjectEnvVar).where(ProjectEnvVar.project_id == task.project_id)
+            )).scalars().all()
+
         settings = self._settings
+
+        project_env: dict[str, str] = {}
+        for ev in env_var_rows:
+            if ev.is_secret:
+                try:
+                    ev_value = decrypt_sm4(ev.value, settings.encryption_key)
+                except Exception:
+                    await self._mark_run_failed(run_id, f"环境变量 {ev.key} 解密失败")
+                    return
+            else:
+                ev_value = ev.value
+            project_env[ev.key] = ev_value
+
         project_dir = os.path.join(settings.data_dir, "tasks", str(task.id))
         os.makedirs(project_dir, exist_ok=True)
 
@@ -181,7 +199,7 @@ class RunnerService:
                 import_proc = await asyncio.create_subprocess_exec(
                     settings.dws_cli_path, "auth", "import", "-i", auth_path, "--base64",
                     stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
-                    env={**os.environ, "HOME": home_dir},
+                    env={**os.environ, **project_env, "HOME": home_dir},
                 )
                 await import_proc.communicate()
 
@@ -212,7 +230,7 @@ class RunnerService:
             proc = await asyncio.create_subprocess_exec(
                 *cmd,
                 stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT,
-                env={**os.environ, "HOME": home_dir},
+                env={**os.environ, **project_env, "HOME": home_dir},
                 cwd=project_dir,
             )
 

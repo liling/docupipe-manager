@@ -9,6 +9,13 @@ from docupipe_manager.models.pipeline_run import RunStatus
 from docupipe_manager.services.runner_service import RunnerService
 
 
+def _empty_env_result():
+    """session.execute(select(ProjectEnvVar)...) 的空结果 mock。"""
+    result = MagicMock()
+    result.scalars.return_value.all.return_value = []
+    return result
+
+
 @pytest.fixture
 def runner_service():
     engine = MagicMock()
@@ -184,6 +191,7 @@ async def test_do_execute_flushes_and_broadcasts_each_line(runner_service, tmp_p
 
     # session 0: get(run)->run_mock, get(task)->task_mock, get(cred)->cred_mock
     sessions[0].get = AsyncMock(side_effect=[run_mock, task_mock, cred_mock])
+    sessions[0].execute = AsyncMock(return_value=_empty_env_result())
     # session 1: update running（标记 started_at + command_text）
     sessions[1].execute = AsyncMock()
     sessions[1].commit = AsyncMock()
@@ -256,6 +264,7 @@ async def test_do_execute_truncates_log_file_at_max_bytes(runner_service, tmp_pa
         return cm
 
     sessions[0].get = AsyncMock(side_effect=[run_mock, task_mock, cred_mock])
+    sessions[0].execute = AsyncMock(return_value=_empty_env_result())
     sessions[1].execute = AsyncMock()
     sessions[1].commit = AsyncMock()
     sessions[2].execute = AsyncMock()
@@ -333,6 +342,7 @@ async def test_do_execute_runs_without_credential(runner_service, tmp_path):
 
     # session 0: get(run)->run_mock, get(task)->task_mock（无 cred get）
     sessions[0].get = AsyncMock(side_effect=[run_mock, task_mock])
+    sessions[0].execute = AsyncMock(return_value=_empty_env_result())
     sessions[1].execute = AsyncMock()
     sessions[1].commit = AsyncMock()
     sessions[2].execute = AsyncMock()
@@ -365,3 +375,78 @@ async def test_do_execute_runs_without_credential(runner_service, tmp_path):
     run_idx = args.index("run")
     assert "--state-dir" in args[:run_idx]
     assert "--log-level" in args[:run_idx]
+
+
+@pytest.mark.asyncio
+async def test_do_execute_injects_project_env_into_subprocess(runner_service, tmp_path):
+    """项目环境变量被合并进子进程 env；项目变量覆盖 os.environ；HOME 保持 home_dir。"""
+    rid = uuid.uuid4()
+    runner_service._active_runs.add(rid)
+    task_id = uuid.uuid4()
+    project_id = uuid.uuid4()
+
+    run_mock = MagicMock()
+    run_mock.id = rid
+    run_mock.task_id = task_id
+    run_mock.mode = "incremental"
+    run_mock.pipeline_name = None
+    task_mock = MagicMock()
+    task_mock.id = task_id
+    task_mock.project_id = project_id
+    task_mock.credential_id = None
+    task_mock.credential_type = None
+    task_mock.config_yaml = "k: v"
+    task_mock.slug = "demo"
+
+    from docupipe_manager.crypto import encrypt_sm4
+    plain = MagicMock()
+    plain.is_secret = False
+    plain.key = "MY_PLAIN"
+    plain.value = "hello"
+    secret = MagicMock()
+    secret.is_secret = True
+    secret.key = "MY_SECRET"
+    secret.value = encrypt_sm4("topsecret", runner_service._settings.encryption_key)
+
+    env_result = MagicMock()
+    env_result.scalars.return_value.all.return_value = [plain, secret]
+
+    sessions = [MagicMock(), MagicMock(), MagicMock(), MagicMock()]
+    idx = {"i": 0}
+
+    def fake_factory():
+        s = sessions[idx["i"]]
+        idx["i"] += 1
+        cm = MagicMock()
+        cm.__aenter__ = AsyncMock(return_value=s)
+        cm.__aexit__ = AsyncMock(return_value=None)
+        return cm
+
+    sessions[0].get = AsyncMock(side_effect=[run_mock, task_mock])
+    sessions[0].execute = AsyncMock(return_value=env_result)
+    sessions[1].execute = AsyncMock()
+    sessions[1].commit = AsyncMock()
+    sessions[2].execute = AsyncMock()
+    sessions[2].commit = AsyncMock()
+    sessions[3].execute = AsyncMock()
+    sessions[3].commit = AsyncMock()
+    runner_service._session_factory = fake_factory
+    runner_service._settings.data_dir = str(tmp_path)
+
+    home_dir = tmp_path / "home"
+
+    with patch("docupipe_manager.services.runner_service.mkdtemp", return_value=str(home_dir)), \
+         patch("asyncio.create_subprocess_exec", new=AsyncMock()) as mock_sub:
+        proc = MagicMock()
+        proc.stdout.readline = AsyncMock(side_effect=[b"ok\n", b""])
+        proc.wait = AsyncMock(return_value=0)
+        proc.pid = 999
+        mock_sub.side_effect = [proc]
+
+        await runner_service._do_execute(rid)
+
+    assert mock_sub.call_count == 1
+    env_passed = mock_sub.call_args.kwargs["env"]
+    assert env_passed["MY_PLAIN"] == "hello"
+    assert env_passed["MY_SECRET"] == "topsecret"
+    assert env_passed["HOME"] == str(home_dir)
