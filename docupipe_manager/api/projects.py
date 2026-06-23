@@ -4,6 +4,8 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
+from sqlalchemy import insert
+
 from docupipe_manager.auth.dependencies import get_current_user, require_admin
 from docupipe_manager.models.project import Project, ProjectStatus
 
@@ -81,14 +83,15 @@ async def create_project(body: CreateProjectRequest, user: dict = Depends(requir
         ))).fetchone()
         if existing:
             raise HTTPException(status_code=409, detail="Project name or slug already exists")
-        project = Project(
-            name=body.name, slug=body.slug, description=body.description,
-            owner_id=uuid.UUID(user["id"]),
+        project_id = uuid.uuid4()
+        await conn.execute(
+            insert(Project).values(
+                id=project_id, name=body.name, slug=body.slug,
+                description=body.description,
+                owner_id=uuid.UUID(user["id"]),
+            )
         )
-        conn.add(project)
-        await conn.flush()
-        pid = project.id
-    return {"id": str(pid)}
+    return {"id": str(project_id)}
 
 
 @router.get("")
