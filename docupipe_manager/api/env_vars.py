@@ -107,7 +107,10 @@ async def update_env_var(project_id: uuid.UUID, var_id: uuid.UUID, body: UpdateE
                 if data["value"]:
                     data["value"] = encrypt_sm4(data["value"], _settings.encryption_key)
                 else:
-                    data.pop("value")
+                    data.pop("value")  # secret + 空/null = 保持原值
+            elif data["value"] is None:
+                data.pop("value")  # 非 secret + null = 保持原值，避免 NOT NULL 违约
+            # 非 secret + 非 null（含空串）→ 明文更新
 
         if data:
             await conn.execute(

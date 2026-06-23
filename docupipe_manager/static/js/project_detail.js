@@ -343,4 +343,4 @@ async function showEnvEditor(varId) {
   });
 }
 
-loadProject(); loadTasks(); loadCredentials(); loadMembers(); loadRuns(); loadEnvVars();
+loadProject(); loadTasks(); loadEnvVars(); loadCredentials(); loadMembers(); loadRuns();
