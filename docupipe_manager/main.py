@@ -119,12 +119,10 @@ DOCUPIPE_NAV_MENU = [
         ],
     },
     {
-        "label": "管理",
-        "require_admin": True,
+        "label": "DocuPipe",
         "items": [
-            {"id": "projects",    "label": "项目",   "href": "/docupipe/projects"},
-            {"id": "credentials", "label": "凭证",   "href": "/docupipe/credentials"},
-            {"id": "runs",        "label": "运行",   "href": "/docupipe/runs"},
+            {"id": "projects", "label": "项目", "href": "/docupipe/projects"},
+            {"id": "runs",     "label": "运行", "href": "/docupipe/runs"},
         ],
     },
 ]
