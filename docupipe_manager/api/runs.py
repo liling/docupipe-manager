@@ -22,7 +22,7 @@ async def _verify_run_access(run_id: uuid.UUID, user: dict):
         result = await conn.execute(
             select(PipelineRun).where(PipelineRun.id == run_id)
         )
-        run = result.scalar_one_or_none()
+        run = result.one_or_none()
     if run is None:
         raise HTTPException(status_code=404, detail="Run not found")
 
@@ -122,12 +122,12 @@ async def _run_detail(run_id: uuid.UUID) -> dict:
     async with engine.begin() as conn:
         run = (await conn.execute(
             select(PipelineRun).where(PipelineRun.id == run_id)
-        )).scalar_one_or_none()
+        )).one_or_none()
         task = None
         if run is not None:
             task = (await conn.execute(
                 select(Task).where(Task.id == run.task_id)
-            )).scalar_one_or_none()
+            )).one_or_none()
 
     if run is None:
         return {}

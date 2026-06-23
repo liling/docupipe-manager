@@ -54,7 +54,7 @@ async def test_get_run_not_found(async_client):
     override_get_current_user({"id": str(uuid.uuid4()), "role": "admin"})
     with patch("docupipe_manager.main.app") as mock_app:
         mock_conn = AsyncMock()
-        mock_conn.execute = AsyncMock(return_value=MagicMock(scalar_one_or_none=MagicMock(return_value=None)))
+        mock_conn.execute = AsyncMock(return_value=MagicMock(one_or_none=MagicMock(return_value=None)))
         mock_engine = MagicMock()
         mock_engine.begin.return_value.__aenter__ = AsyncMock(return_value=mock_conn)
         mock_engine.begin.return_value.__aexit__ = AsyncMock(return_value=None)
@@ -74,7 +74,7 @@ async def test_cancel_run(async_client):
     with patch("docupipe_manager.main.app") as mock_app:
         mock_conn = AsyncMock()
         mock_conn.execute = AsyncMock(return_value=MagicMock(
-            scalar_one_or_none=MagicMock(return_value=run_mock)
+            one_or_none=MagicMock(return_value=run_mock)
         ))
         mock_engine = MagicMock()
         mock_engine.begin.return_value.__aenter__ = AsyncMock(return_value=mock_conn)
@@ -116,9 +116,9 @@ async def test_get_run_includes_command_and_task_name(async_client):
         mock_conn = AsyncMock()
         # _verify_run_access 查 run；_run_detail 再查 run + task
         mock_conn.execute = AsyncMock(side_effect=[
-            MagicMock(scalar_one_or_none=MagicMock(return_value=run_mock)),  # access
-            MagicMock(scalar_one_or_none=MagicMock(return_value=run_mock)),  # detail run
-            MagicMock(scalar_one_or_none=MagicMock(return_value=task_mock)), # detail task
+            MagicMock(one_or_none=MagicMock(return_value=run_mock)),  # access
+            MagicMock(one_or_none=MagicMock(return_value=run_mock)),  # detail run
+            MagicMock(one_or_none=MagicMock(return_value=task_mock)), # detail task
         ])
         mock_engine = MagicMock()
         mock_engine.begin.return_value.__aenter__ = AsyncMock(return_value=mock_conn)
@@ -163,11 +163,11 @@ async def test_stream_completed_run_reads_file(async_client, tmp_path):
     with patch("docupipe_manager.main.app") as mock_app:
         mock_conn = AsyncMock()
         mock_conn.execute = AsyncMock(side_effect=[
-            MagicMock(scalar_one_or_none=MagicMock(return_value=run_mock)),  # access
-            MagicMock(scalar_one_or_none=MagicMock(return_value=run_mock)),  # detail(meta)
-            MagicMock(scalar_one_or_none=MagicMock(return_value=task_mock)),
-            MagicMock(scalar_one_or_none=MagicMock(return_value=run_mock)),  # detail(end)
-            MagicMock(scalar_one_or_none=MagicMock(return_value=task_mock)),
+            MagicMock(one_or_none=MagicMock(return_value=run_mock)),  # access
+            MagicMock(one_or_none=MagicMock(return_value=run_mock)),  # detail(meta)
+            MagicMock(one_or_none=MagicMock(return_value=task_mock)),
+            MagicMock(one_or_none=MagicMock(return_value=run_mock)),  # detail(end)
+            MagicMock(one_or_none=MagicMock(return_value=task_mock)),
         ])
         mock_engine = MagicMock()
         mock_engine.begin.return_value.__aenter__ = AsyncMock(return_value=mock_conn)
@@ -216,11 +216,11 @@ async def test_stream_active_run_replays_history_then_live_then_end(async_client
     with patch("docupipe_manager.main.app") as mock_app:
         mock_conn = AsyncMock()
         mock_conn.execute = AsyncMock(side_effect=[
-            MagicMock(scalar_one_or_none=MagicMock(return_value=run_mock)),  # access
-            MagicMock(scalar_one_or_none=MagicMock(return_value=run_mock)),  # detail(meta)
-            MagicMock(scalar_one_or_none=MagicMock(return_value=task_mock)),
-            MagicMock(scalar_one_or_none=MagicMock(return_value=run_mock)),  # detail(end)
-            MagicMock(scalar_one_or_none=MagicMock(return_value=task_mock)),
+            MagicMock(one_or_none=MagicMock(return_value=run_mock)),  # access
+            MagicMock(one_or_none=MagicMock(return_value=run_mock)),  # detail(meta)
+            MagicMock(one_or_none=MagicMock(return_value=task_mock)),
+            MagicMock(one_or_none=MagicMock(return_value=run_mock)),  # detail(end)
+            MagicMock(one_or_none=MagicMock(return_value=task_mock)),
         ])
         mock_engine = MagicMock()
         mock_engine.begin.return_value.__aenter__ = AsyncMock(return_value=mock_conn)
