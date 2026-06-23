@@ -43,6 +43,8 @@ class RunnerService:
         history = list(buffer) if buffer else []
         queue: asyncio.Queue = asyncio.Queue()
         self._subscribers.setdefault(run_id, set()).add(queue)
+        if run_id not in self._active_runs:
+            queue.put_nowait(None)   # run already ended; guarantee the sentinel
         return history, queue
 
     def unsubscribe(self, run_id: uuid.UUID, queue: asyncio.Queue) -> None:

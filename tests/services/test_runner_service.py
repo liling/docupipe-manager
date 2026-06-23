@@ -66,6 +66,7 @@ async def test_mark_run_failed(runner_service):
 @pytest.mark.asyncio
 async def test_subscribe_returns_buffer_then_live(runner_service):
     rid = uuid.uuid4()
+    runner_service._active_runs.add(rid)
     runner_service._broadcast(rid, "old line 1")
     runner_service._broadcast(rid, "old line 2")
     history, queue = runner_service.subscribe(rid)
@@ -77,6 +78,7 @@ async def test_subscribe_returns_buffer_then_live(runner_service):
 @pytest.mark.asyncio
 async def test_unsubscribe_stops_broadcast(runner_service):
     rid = uuid.uuid4()
+    runner_service._active_runs.add(rid)
     history, queue = runner_service.subscribe(rid)
     runner_service.unsubscribe(rid, queue)
     runner_service._broadcast(rid, "after")
@@ -97,8 +99,21 @@ def test_broadcast_drops_old_lines_beyond_maxlen(runner_service):
 
 
 @pytest.mark.asyncio
+async def test_subscribe_after_run_ended_gets_sentinel(runner_service):
+    """订阅时 run 已结束（不在 _active_runs）→ 立即收到哨兵 None。"""
+    rid = uuid.uuid4()
+    # 不加入 _active_runs，模拟 run 已结束；用 _broadcast 预置历史行
+    runner_service._broadcast(rid, "seeded line")
+    history, queue = runner_service.subscribe(rid)
+    assert history == ["seeded line"]
+    # 无需任何 broadcast，哨兵应立即可取
+    assert queue.get_nowait() is None
+
+
+@pytest.mark.asyncio
 async def test_close_subscribers_sends_sentinel_and_cleans(runner_service):
     rid = uuid.uuid4()
+    runner_service._active_runs.add(rid)
     _, queue = runner_service.subscribe(rid)
     runner_service._broadcast(rid, "x")
     await runner_service._close_subscribers(rid)
@@ -135,6 +150,7 @@ async def test_execute_run_closes_subscribers_on_exception(runner_service):
 async def test_do_execute_flushes_and_broadcasts_each_line(runner_service, tmp_path):
     """端到端 mock：验证写文件 flush、广播、command_text 持久化。"""
     rid = uuid.uuid4()
+    runner_service._active_runs.add(rid)
     task_id = uuid.uuid4()
 
     # --- 准备 run/task/credential mocks ---
@@ -208,6 +224,7 @@ async def test_do_execute_flushes_and_broadcasts_each_line(runner_service, tmp_p
 async def test_do_execute_truncates_log_file_at_max_bytes(runner_service, tmp_path):
     """验证日志文件超过 max_bytes 后被截断到 max_bytes//2，且全部行仍被广播。"""
     rid = uuid.uuid4()
+    runner_service._active_runs.add(rid)
     task_id = uuid.uuid4()
 
     run_mock = MagicMock()
