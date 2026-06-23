@@ -1,14 +1,12 @@
+import enum
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, Enum, String, Text, func
+from sqlalchemy import DateTime, Enum, ForeignKey, String, UniqueConstraint, func
 from sqlalchemy.dialects.postgresql import BYTEA, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from docupipe_manager.models.base import Base
-
-import enum
-
 
 _SCHEMA = "docupipe_manager"
 
@@ -21,9 +19,15 @@ class CredentialStatus(str, enum.Enum):
 
 class DwsCredential(Base):
     __tablename__ = "dws_credentials"
+    __table_args__ = (
+        UniqueConstraint("project_id", "name", name="uq_dws_credentials_project_name"),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID, primary_key=True, default=uuid.uuid4)
-    name: Mapped[str] = mapped_column(String(255), unique=True, nullable=False)
+    project_id: Mapped[uuid.UUID] = mapped_column(
+        UUID, ForeignKey(f"{_SCHEMA}.projects.id", ondelete="CASCADE"), nullable=False
+    )
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
     corp_id: Mapped[str] = mapped_column(String(64), nullable=False)
     auth_blob: Mapped[bytes] = mapped_column(BYTEA, nullable=False)
     token_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

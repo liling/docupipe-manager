@@ -2,12 +2,11 @@ import enum
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, Enum, Integer, String, Text, func
+from sqlalchemy import DateTime, Enum, ForeignKey, Integer, String, Text, func
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from docupipe_manager.models.base import Base
-
 
 _SCHEMA = "docupipe_manager"
 
@@ -29,7 +28,9 @@ class PipelineRun(Base):
     __tablename__ = "pipeline_runs"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID, primary_key=True, default=uuid.uuid4)
-    project_id: Mapped[uuid.UUID] = mapped_column(UUID, nullable=False)
+    task_id: Mapped[uuid.UUID] = mapped_column(
+        UUID, ForeignKey(f"{_SCHEMA}.tasks.id", ondelete="CASCADE"), nullable=False
+    )
     trigger_type: Mapped[RunTriggerType] = mapped_column(
         Enum(RunTriggerType, name="run_trigger_type", schema=_SCHEMA, create_constraint=True),
         nullable=False,
