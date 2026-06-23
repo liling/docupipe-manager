@@ -139,6 +139,8 @@ install_ui(
     docupipe_url=settings.base_url,
 )
 
+app.mount("/static", StaticFiles(directory="docupipe_manager/static"), name="static")
+
 from docupipe_manager.api.auth import router as auth_router
 from docupipe_manager.api.pages import router as pages_router
 from docupipe_manager.api.projects import admin_router as projects_admin_router, router as projects_router

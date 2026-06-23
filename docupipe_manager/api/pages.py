@@ -7,7 +7,7 @@ from fastapi.templating import Jinja2Templates
 from jinja2 import Environment, FileSystemLoader
 from starlette.templating import _TemplateResponse
 
-from docupipe_manager.auth.dependencies import get_current_user
+from docupipe_manager.auth.dependencies import get_current_user, require_admin
 
 router = APIRouter(prefix="/docupipe", tags=["pages"])
 
@@ -27,82 +27,33 @@ async def docupipe_root():
     return RedirectResponse(url="/docupipe/projects")
 
 
-@router.get("/projects/new")
-async def projects_new(request: Request, user: dict = Depends(get_current_user)):
-    from docupipe_manager.main import app
-    from sqlalchemy import text
-    credentials = []
-    try:
-        async with app.state.engine.begin() as conn:
-            rows = (await conn.execute(
-                text("SELECT id, name FROM docupipe_manager.dws_credentials WHERE status = 'active' ORDER BY name")
-            )).fetchall()
-            credentials = [{"id": str(r.id), "name": r.name} for r in rows]
-    except Exception:
-        pass
-    return _render(request, "docupipe/project_form.html", {
-        "current_user": user, "project": None, "credentials": credentials,
-    })
-
-
-@router.get("/projects/{project_id}/edit")
-async def projects_edit(request: Request, project_id: str, user: dict = Depends(get_current_user)):
-    from docupipe_manager.main import app
-    from sqlalchemy import text
-    project = None
-    credentials = []
-    try:
-        async with app.state.engine.begin() as conn:
-            row = (await conn.execute(
-                text("SELECT id, name, slug, description, config_yaml, dws_credential_id, "
-                     "schedule_cron, schedule_enabled, schedule_pipeline, schedule_mode, status "
-                     "FROM docupipe_manager.docupipe_projects WHERE id = :id"),
-                {"id": project_id},
-            )).fetchone()
-            if row:
-                project = dict(row._mapping)
-                project["id"] = str(project["id"])
-                project["dws_credential_id"] = str(project["dws_credential_id"])
-
-            rows = (await conn.execute(
-                text("SELECT id, name FROM docupipe_manager.dws_credentials WHERE status = 'active' ORDER BY name")
-            )).fetchall()
-            credentials = [{"id": str(r.id), "name": r.name} for r in rows]
-    except Exception:
-        pass
-    if not project:
-        return RedirectResponse(url="/docupipe/projects")
-    return _render(request, "docupipe/project_form.html", {
-        "current_user": user, "project": project, "credentials": credentials,
-    })
-
-
 @router.get("/projects")
 async def projects_list(request: Request, user: dict = Depends(get_current_user)):
-    from docupipe_manager.main import app
-    from sqlalchemy import select
-    from docupipe_manager.models.docupipe_project import DocupipeProject
+    return _render(request, "docupipe/projects.html", {"current_user": user})
 
-    stats = None
-    projects = []
-    try:
-        from docupipe_manager.api.stats import get_stats
-        stats = await get_stats(user)
-    except Exception:
-        pass
 
-    try:
-        async with app.state.engine.begin() as conn:
-            result = await conn.execute(
-                select(DocupipeProject).order_by(DocupipeProject.created_at.desc())
-            )
-            projects = result.fetchall()
-    except Exception:
-        pass
+@router.get("/projects/new")
+async def projects_new(request: Request, user: dict = Depends(require_admin)):
+    return _render(request, "docupipe/project_detail.html",
+                   {"current_user": user, "mode": "new", "project": None})
 
-    return _render(request, "docupipe/projects.html", {
-        "current_user": user, "stats": stats, "projects": projects,
-    })
+
+@router.get("/projects/{project_id}")
+async def project_detail(request: Request, project_id: str, user: dict = Depends(get_current_user)):
+    return _render(request, "docupipe/project_detail.html",
+                   {"current_user": user, "mode": "view", "project_id": project_id, "project": None})
+
+
+@router.get("/projects/{project_id}/tasks/new")
+async def task_new(request: Request, project_id: str, user: dict = Depends(get_current_user)):
+    return _render(request, "docupipe/task_form.html",
+                   {"current_user": user, "project_id": project_id, "task": None})
+
+
+@router.get("/projects/{project_id}/tasks/{task_id}/edit")
+async def task_edit(request: Request, project_id: str, task_id: str, user: dict = Depends(get_current_user)):
+    return _render(request, "docupipe/task_form.html",
+                   {"current_user": user, "project_id": project_id, "task_id": task_id, "task": None})
 
 
 @router.get("/credentials")

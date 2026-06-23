@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="container" data-project-id="{{ project_id or '' }}" data-mode="{{ mode }}">
+  {% if mode == "new" %}
+  <h1 class="text-2xl font-bold mb-4">创建项目</h1>
+  <form id="project-form" class="space-y-3 max-w-lg">
+    <input name="name" placeholder="项目名" class="input" required>
+    <input name="slug" placeholder="slug (a-z0-9-)" pattern="[a-z0-9-]+" class="input" required>
+    <textarea name="description" placeholder="描述（可选）" class="input"></textarea>
+    <button class="btn btn-primary">创建</button>
+  </form>
+  <script>
+    document.getElementById("project-form").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const f = new FormData(e.target);
+      const body = Object.fromEntries(f.entries());
+      const r = await fetch("/admin/api/projects", {
+        method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(body),
+      });
+      if (r.ok) { const j = await r.json(); location.href = `/docupipe/projects/${j.id}`; }
+      else { alert((await r.json()).detail || "创建失败"); }
+    });
+  </script>
+  {% else %}
+  <div class="flex items-center gap-3 mb-4">
+    <h1 id="proj-name" class="text-2xl font-bold">加载中...</h1>
+    <span id="proj-status" class="text-sm text-gray-500"></span>
+  </div>
+  <div class="tabs mb-4">
+    <button class="tab tab-active" data-tab="tasks">任务</button>
+    <button class="tab" data-tab="credentials">凭证</button>
+    <button class="tab" data-tab="members">成员</button>
+    <button class="tab" data-tab="runs">运行历史</button>
+  </div>
+  <div id="tab-tasks" class="tab-panel"></div>
+  <div id="tab-credentials" class="tab-panel hidden"></div>
+  <div id="tab-members" class="tab-panel hidden"></div>
+  <div id="tab-runs" class="tab-panel hidden"></div>
+  <script src="/static/js/project_detail.js"></script>
+  {% endif %}
+</div>
+<script>
+document.querySelectorAll(".tab").forEach(b => b.addEventListener("click", () => {
+  document.querySelectorAll(".tab").forEach(x => x.classList.remove("tab-active"));
+  document.querySelectorAll(".tab-panel").forEach(x => x.classList.add("hidden"));
+  b.classList.add("tab-active");
+  document.getElementById("tab-" + b.dataset.tab).classList.remove("hidden");
+}));
+</script>
+{% endblock %}
