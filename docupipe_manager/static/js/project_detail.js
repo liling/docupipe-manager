@@ -233,4 +233,101 @@ async function loadRuns() {
     '</div>';
 }
 
-loadProject(); loadTasks(); loadCredentials(); loadMembers(); loadRuns();
+async function loadEnvVars() {
+  const box = document.getElementById("tab-env-vars");
+  let html = '<div style="margin-bottom:10px"><button class="btn btn-sm btn-primary" id="env-add">新增变量</button></div>';
+  html += '<div id="env-editor" class="hidden card" style="margin-bottom:10px"></div>';
+  html += '<div id="env-list"></div>';
+  box.innerHTML = html;
+  document.getElementById("env-add").addEventListener("click", () => showEnvEditor(null));
+  await refreshEnvList();
+}
+
+async function refreshEnvList() {
+  const r = await fetch(`/api/projects/${pid}/env-vars`);
+  const vars = await r.json();
+  const list = document.getElementById("env-list");
+  if (!vars.length) {
+    list.innerHTML = '<div class="empty-state">暂无环境变量。</div>';
+    return;
+  }
+  let html = '<table class="data-table"><thead><tr><th>变量名</th><th>值</th><th>类型</th><th>说明</th><th>操作</th></tr></thead><tbody>';
+  for (const v of vars) {
+    const valCell = v.is_secret ? '<span class="card-row-meta-inline">•••••• 🔒</span>' : `<code>${v.value || ""}</code>`;
+    const typeTag = v.is_secret ? '<span class="status-tag">密钥</span>' : '<span class="card-row-meta-inline">普通</span>';
+    html += `<tr>
+      <td><code>${v.key}</code></td>
+      <td>${valCell}</td>
+      <td>${typeTag}</td>
+      <td>${v.description || "—"}</td>
+      <td class="action-cell">
+        <button class="btn btn-sm btn-secondary env-edit" data-id="${v.id}">编辑</button>
+        <button class="btn btn-sm btn-danger env-del" data-id="${v.id}">删除</button>
+      </td>
+    </tr>`;
+  }
+  html += '</tbody></table>';
+  list.innerHTML = html;
+  list.querySelectorAll(".env-edit").forEach(b => b.addEventListener("click", () => showEnvEditor(b.dataset.id)));
+  list.querySelectorAll(".env-del").forEach(b => b.addEventListener("click", async () => {
+    if (!confirm("确认删除该环境变量？")) return;
+    const dr = await fetch(`/api/projects/${pid}/env-vars/${b.dataset.id}`, {method: "DELETE"});
+    if (dr.ok) { refreshEnvList(); } else { alert("删除失败"); }
+  }));
+}
+
+async function showEnvEditor(varId) {
+  const editor = document.getElementById("env-editor");
+  editor.classList.remove("hidden");
+  let v = null;
+  if (varId) {
+    const r = await fetch(`/api/projects/${pid}/env-vars`);
+    const all = await r.json();
+    v = all.find(x => x.id === varId);
+  }
+  const isEdit = !!v;
+  const valPlaceholder = (isEdit && v.is_secret) ? 'placeholder="留空表示不修改"' : 'placeholder="值"';
+  const secretDisabled = isEdit ? 'disabled' : '';
+  const secretChecked = (isEdit && v.is_secret) ? 'checked' : '';
+  editor.innerHTML = `
+    <h3>${isEdit ? "编辑环境变量" : "新增环境变量"}</h3>
+    <div class="form-group"><label>变量名</label>
+      <input id="env-key" class="form-control" value="${isEdit ? v.key : ""}" placeholder="如 MY_VAR" pattern="^[A-Za-z_][A-Za-z0-9_]*$"></div>
+    <div class="form-group"><label>值</label>
+      <input id="env-value" class="form-control" ${valPlaceholder}></div>
+    <div class="form-group"><label><input type="checkbox" id="env-secret" ${secretChecked} ${secretDisabled}> 密钥（加密存储）</label></div>
+    <div class="form-group"><label>说明（可选）</label>
+      <input id="env-desc" class="form-control" value="${isEdit && v.description ? v.description : ""}"></div>
+    <div class="form-actions">
+      <button class="btn btn-sm btn-primary" id="env-save">保存</button>
+      <button class="btn btn-sm btn-secondary" id="env-cancel">取消</button>
+    </div>`;
+  document.getElementById("env-cancel").addEventListener("click", () => editor.classList.add("hidden"));
+  document.getElementById("env-save").addEventListener("click", async () => {
+    const body = {
+      key: document.getElementById("env-key").value.trim(),
+      value: document.getElementById("env-value").value,
+      is_secret: document.getElementById("env-secret").checked,
+      description: document.getElementById("env-desc").value.trim() || null,
+    };
+    if (!body.key) { alert("变量名不能为空"); return; }
+    if (!isEdit && !body.value && !body.is_secret) { alert("值不能为空"); return; }
+    let r;
+    if (isEdit) {
+      const upd = {description: body.description};
+      if (document.getElementById("env-key").value.trim() !== v.key) upd.key = body.key;
+      if (document.getElementById("env-value").value) upd.value = body.value;
+      r = await fetch(`/api/projects/${pid}/env-vars/${varId}`, {
+        method: "PUT", headers: {"Content-Type": "application/json"}, body: JSON.stringify(upd),
+      });
+    } else {
+      r = await fetch(`/api/projects/${pid}/env-vars`, {
+        method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(body),
+      });
+    }
+    if (r.ok) { editor.classList.add("hidden"); refreshEnvList(); }
+    else { const j = await r.json(); alert(j.detail || "保存失败"); }
+  });
+}
+
+loadProject(); loadTasks(); loadCredentials(); loadMembers(); loadRuns(); loadEnvVars();
