@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+{% block title %}运行详情{% endblock %}
+{% block content %}
+<div data-run-id="{{ run_id }}">
+  <div class="content-header">
+    <h2><span id="run-task-name">加载中...</span> <span id="run-status" class="status-tag"></span></h2>
+    <div class="content-header-actions">
+      <a href="#" id="run-back" class="btn btn-secondary">返回</a>
+    </div>
+  </div>
+
+  <div class="card" style="margin-bottom:18px">
+    <div class="run-meta-row"><span class="card-row-meta">启动命令</span></div>
+    <pre id="run-command" class="run-command">—</pre>
+    <div class="run-meta-grid">
+      <div><span class="card-row-meta">退出码</span> <span id="run-exit-code">—</span></div>
+      <div><span class="card-row-meta">开始</span> <span id="run-started-at">—</span></div>
+      <div><span class="card-row-meta">结束</span> <span id="run-completed-at">—</span></div>
+    </div>
+    <div class="form-actions">
+      <a id="run-download" class="btn btn-sm btn-secondary" href="#">下载日志</a>
+      <button id="run-cancel" class="btn btn-sm btn-danger hidden">取消运行</button>
+    </div>
+  </div>
+
+  <div class="console-toolbar">
+    <span class="card-row-meta">控制台输出</span>
+    <label class="check-row"><input type="checkbox" id="autoscroll" checked> 自动滚动</label>
+  </div>
+  <pre id="console" class="console"></pre>
+</div>
+<script src="/static/js/run_detail.js"></script>
+{% endblock %}

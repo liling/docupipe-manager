@@ -66,6 +66,12 @@ async def runs_list(request: Request, user: dict = Depends(get_current_user)):
     return _render(request, "docupipe/runs.html", {"current_user": user})
 
 
+@router.get("/runs/{run_id}")
+async def run_detail(request: Request, run_id: str, user: dict = Depends(get_current_user)):
+    return _render(request, "docupipe/runs/detail.html",
+                   {"current_user": user, "run_id": run_id})
+
+
 def _render(request: Request, template: str, context: dict) -> _TemplateResponse:
     ui_vars = _ui_vars(request)
     merged = {**ui_vars, **context}
