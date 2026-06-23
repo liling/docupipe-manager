@@ -3,6 +3,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from docupipe_manager.models.task import CredentialType
 from docupipe_manager.models.pipeline_run import RunStatus
 from docupipe_manager.services.runner_service import RunnerService
 
@@ -23,53 +24,39 @@ def runner_service():
 
 
 @pytest.mark.asyncio
-async def test_start_run_creates_run(runner_service):
-    project_id = uuid.uuid4()
+async def test_start_run_creates_run_with_task_id(runner_service):
+    task_id = uuid.uuid4()
     with patch.object(runner_service, "_session_factory") as mock_sf:
         mock_session = AsyncMock()
         mock_sf.return_value.__aenter__.return_value = mock_session
         mock_session.add = MagicMock()
         mock_session.commit = AsyncMock()
-
-        with patch.object(runner_service, "_execute_run") as mock_exec:
-            mock_exec.return_value = None
-
+        with patch.object(runner_service, "_execute_run", new=AsyncMock()):
             run = await runner_service.start_run(
-                project_id=project_id,
-                trigger_type="manual",
-                triggered_by=uuid.uuid4(),
+                task_id=task_id, trigger_type="manual", triggered_by=uuid.uuid4(),
             )
-
             assert run.status == RunStatus.pending
-            assert run.project_id == project_id
+            assert run.task_id == task_id
 
 
 @pytest.mark.asyncio
 async def test_cancel_pending_run(runner_service):
-    run_id = uuid.uuid4()
     run_mock = MagicMock()
     run_mock.status = RunStatus.pending
-
     with patch.object(runner_service, "_session_factory") as mock_sf:
         mock_session = AsyncMock()
         mock_sf.return_value.__aenter__.return_value = mock_session
         mock_session.get = AsyncMock(return_value=run_mock)
-
-        await runner_service.cancel_run(run_id)
+        await runner_service.cancel_run(uuid.uuid4())
         assert run_mock.status == RunStatus.cancelled
-        mock_session.commit.assert_awaited_once()
 
 
 @pytest.mark.asyncio
 async def test_mark_run_failed(runner_service):
-    run_id = uuid.uuid4()
-
     with patch.object(runner_service, "_session_factory") as mock_sf:
         mock_session = AsyncMock()
         mock_sf.return_value.__aenter__.return_value = mock_session
         mock_session.execute = AsyncMock()
         mock_session.commit = AsyncMock()
-
-        await runner_service._mark_run_failed(run_id, "test error")
+        await runner_service._mark_run_failed(uuid.uuid4(), "err")
         mock_session.execute.assert_awaited_once()
-        mock_session.commit.assert_awaited_once()

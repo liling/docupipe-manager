@@ -13,8 +13,8 @@ from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker
 from docupipe_manager.config import Settings
 from docupipe_manager.crypto import decrypt_sm4
 from docupipe_manager.models.dws_credential import DwsCredential
-from docupipe_manager.models.docupipe_project import DocupipeProject
 from docupipe_manager.models.pipeline_run import PipelineRun, RunStatus
+from docupipe_manager.models.task import CredentialType, Task
 from docupipe_manager.platform.client import XinyiPlatformClient
 
 logger = logging.getLogger(__name__)
@@ -32,7 +32,7 @@ class RunnerService:
 
     async def start_run(
         self,
-        project_id: uuid.UUID,
+        task_id: uuid.UUID,
         trigger_type: str,
         triggered_by: uuid.UUID | None,
         pipeline_name: str | None = None,
@@ -40,7 +40,7 @@ class RunnerService:
     ) -> PipelineRun:
         """Create a run record and start execution in background."""
         run = PipelineRun(
-            project_id=project_id,
+            task_id=task_id,
             trigger_type=trigger_type,
             triggered_by=triggered_by,
             pipeline_name=pipeline_name,
@@ -91,19 +91,30 @@ class RunnerService:
             run = await session.get(PipelineRun, run_id)
             if run is None:
                 return
-            project = await session.get(DocupipeProject, run.project_id)
-            credential = await session.get(DwsCredential, project.dws_credential_id)
-            if project is None or credential is None:
-                await self._mark_run_failed(run_id, "Project or credential not found")
+            task = await session.get(Task, run.task_id)
+            if task is None:
+                await self._mark_run_failed(run_id, "Task not found")
+                return
+            if task.credential_id is None or task.credential_type is None:
+                await self._mark_run_failed(run_id, "Task has no credential bound")
+                return
+            if task.credential_type == CredentialType.dws:
+                credential = await session.get(DwsCredential, task.credential_id)
+            else:
+                await self._mark_run_failed(run_id, f"Unsupported credential type: {task.credential_type}")
+                return
+            if credential is None:
+                await self._mark_run_failed(run_id, "Credential not found")
                 return
 
-            config_yaml = project.config_yaml
-            slug = project.slug
+            config_yaml = task.config_yaml
+            slug = task.slug
             mode = run.mode
             pipeline_name = run.pipeline_name
+            cred_type = task.credential_type
 
         settings = self._settings
-        project_dir = os.path.join(settings.data_dir, "projects", slug)
+        project_dir = os.path.join(settings.data_dir, "tasks", str(task.id))
         os.makedirs(project_dir, exist_ok=True)
 
         config_path = os.path.join(project_dir, "config.yaml")
@@ -205,7 +216,7 @@ class RunnerService:
             asyncio.create_task(self._platform_client.push_audit({
                 "event": event,
                 "run_id": str(run_id),
-                "project_id": str(run.project_id if run else project_id),
+                "task_id": str(run.task_id),
                 "exit_code": exit_code,
             }))
 
