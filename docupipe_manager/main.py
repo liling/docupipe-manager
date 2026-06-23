@@ -113,12 +113,6 @@ from xinyi_platform.ui_common import install_ui  # noqa: E402
 
 DOCUPIPE_NAV_MENU = [
     {
-        "label": "账户",
-        "items": [
-            {"id": "account", "label": "我的账户", "href": "/account"},
-        ],
-    },
-    {
         "label": "DocuPipe",
         "items": [
             {"id": "projects", "label": "项目", "href": "/docupipe/projects"},
