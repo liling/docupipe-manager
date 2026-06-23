@@ -316,7 +316,12 @@ async function showEnvEditor(varId) {
     if (isEdit) {
       const upd = {description: body.description};
       if (document.getElementById("env-key").value.trim() !== v.key) upd.key = body.key;
-      if (document.getElementById("env-value").value) upd.value = body.value;
+      const valField = document.getElementById("env-value").value;
+      if (!v.is_secret) {
+        upd.value = valField;
+      } else if (valField) {
+        upd.value = valField;
+      }
       r = await fetch(`/api/projects/${pid}/env-vars/${varId}`, {
         method: "PUT", headers: {"Content-Type": "application/json"}, body: JSON.stringify(upd),
       });
