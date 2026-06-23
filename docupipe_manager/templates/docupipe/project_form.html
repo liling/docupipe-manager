@@ -1,0 +1,110 @@
+{% extends "base.html" %}
+{% block title %}{{ '编辑项目' if project else '新建项目' }}{% endblock %}
+{% block content %}
+<div class="content-header">
+    <h2>{{ '编辑项目' if project else '新建项目' }}</h2>
+    <div class="content-header-actions">
+        <a href="/docupipe/projects" class="btn btn-ghost">返回列表</a>
+    </div>
+</div>
+
+<div class="card" style="max-width:800px;">
+    <form method="post" action="{{ '/admin/api/docupipe/projects' if not project else '/admin/api/docupipe/projects/' + project.id }}" onsubmit="return submitForm(this)">
+        <div class="form-group">
+            <label>名称</label>
+            <input type="text" name="name" value="{{ project.name if project else '' }}" required maxlength="255">
+        </div>
+        <div class="form-group">
+            <label>Slug</label>
+            <input type="text" name="slug" value="{{ project.slug if project else '' }}" required pattern="[a-z0-9-]+" maxlength="64">
+            <span class="text-muted">只允许小写字母、数字和连字符</span>
+        </div>
+        <div class="form-group">
+            <label>描述</label>
+            <textarea name="description" rows="2">{{ project.description if project else '' }}</textarea>
+        </div>
+        <div class="form-group">
+            <label>绑定凭证</label>
+            <select name="dws_credential_id" required>
+                <option value="">— 选择凭证 —</option>
+                {% for c in credentials %}
+                <option value="{{ c.id }}" {% if project and project.dws_credential_id == c.id %}selected{% endif %}>{{ c.name }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div class="form-group">
+            <label>docupipe.yaml</label>
+            <textarea name="config_yaml" rows="12" style="font-family:'SF Mono','Fira Code',monospace;font-size:13px;">{{ project.config_yaml if project else '' }}</textarea>
+        </div>
+
+        <hr style="border:none;border-top:1px solid var(--border);margin:24px 0;">
+
+        <h3 style="font-size:16px;font-weight:600;margin-bottom:16px;">调度设置</h3>
+        <div class="form-group">
+            <label>Cron 表达式</label>
+            <input type="text" name="schedule_cron" value="{{ project.schedule_cron if project else '' }}" placeholder="0 3 * * *">
+            <span class="text-muted">标准 5 段 cron。留空表示仅手工触发</span>
+        </div>
+        <div class="form-group">
+            <label>
+                <input type="checkbox" name="schedule_enabled" {% if not project or project.schedule_enabled %}checked{% endif %} value="true">
+                启用调度
+            </label>
+        </div>
+        <div class="form-group">
+            <label>运行 Pipeline</label>
+            <input type="text" name="schedule_pipeline" value="{{ project.schedule_pipeline if project else '' }}" placeholder="留空则全跑">
+        </div>
+        <div class="form-group">
+            <label>模式</label>
+            <select name="schedule_mode">
+                <option value="incremental" {% if not project or project.schedule_mode == 'incremental' %}selected{% endif %}>incremental</option>
+                <option value="full" {% if project and project.schedule_mode == 'full' %}selected{% endif %}>full</option>
+                <option value="mirror" {% if project and project.schedule_mode == 'mirror' %}selected{% endif %}>mirror</option>
+            </select>
+        </div>
+
+        <div style="display:flex;gap:12px;justify-content:flex-end;margin-top:28px;padding-top:20px;border-top:1px solid var(--border);">
+            {% if project %}
+            <button type="button" class="btn btn-secondary" onclick="triggerRun('{{ project.id }}')">立即运行</button>
+            {% endif %}
+            <button type="submit" class="btn btn-primary">{{ '保存' if project else '创建' }}</button>
+        </div>
+    </form>
+</div>
+
+<script>
+async function submitForm(form) {
+    const data = Object.fromEntries(new FormData(form));
+    if (data.schedule_enabled === 'true') data.schedule_enabled = true;
+    else data.schedule_enabled = false;
+
+    const url = form.action;
+    const method = form.querySelector('input[name="name"]') ? '{{ "PUT" if project else "POST" }}' : 'POST';
+
+    const resp = await fetch(url, {
+        method: method,
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(data),
+    });
+    if (resp.ok) {
+        window.location.href = '/docupipe/projects';
+    } else {
+        const err = await resp.json();
+        alert('保存失败: ' + (err.detail || err.message || '未知错误'));
+    }
+    return false;
+}
+
+{% if project %}
+async function triggerRun(id) {
+    const resp = await fetch('/admin/api/docupipe/projects/' + id + '/trigger', {method: 'POST'});
+    if (resp.ok) {
+        alert('已触发运行');
+    } else {
+        alert('触发失败');
+    }
+}
+{% endif %}
+</script>
+{% endblock %}

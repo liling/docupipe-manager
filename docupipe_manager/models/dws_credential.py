@@ -1,0 +1,41 @@
+import uuid
+from datetime import datetime
+
+from sqlalchemy import DateTime, Enum, String, Text, func
+from sqlalchemy.dialects.postgresql import BYTEA, UUID
+from sqlalchemy.orm import Mapped, mapped_column
+
+from docupipe_manager.models.base import Base
+
+import enum
+
+
+_SCHEMA = "docupipe_manager"
+
+
+class CredentialStatus(str, enum.Enum):
+    active = "active"
+    expired = "expired"
+    revoked = "revoked"
+
+
+class DwsCredential(Base):
+    __tablename__ = "dws_credentials"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID, primary_key=True, default=uuid.uuid4)
+    name: Mapped[str] = mapped_column(String(255), unique=True, nullable=False)
+    corp_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    auth_blob: Mapped[bytes] = mapped_column(BYTEA, nullable=False)
+    token_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    refresh_token_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_refreshed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    status: Mapped[CredentialStatus] = mapped_column(
+        Enum(CredentialStatus, name="credential_status", schema=_SCHEMA, create_constraint=True),
+        default=CredentialStatus.active,
+        nullable=False,
+    )
+    created_by: Mapped[uuid.UUID] = mapped_column(UUID, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )

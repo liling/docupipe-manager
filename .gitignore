@@ -1,0 +1,17 @@
+# Byte-compiled
+__pycache__/
+*.py[cod]
+*.egg-info/
+
+# Virtualenv
+.venv/
+
+# Environment
+.env
+
+# Data directory
+data/
+
+# IDE
+.idea/
+.vscode/

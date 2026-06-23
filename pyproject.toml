@@ -1,0 +1,38 @@
+[project]
+name = "docupipe-manager"
+version = "0.1.0"
+description = "Document pipeline manager for hindsight/docupipe ecosystem"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi",
+    "uvicorn[standard]",
+    "sqlalchemy[asyncio]",
+    "alembic",
+    "apscheduler",
+    "croniter",
+    "pyyaml",
+    "jinja2",
+    "pydantic-settings",
+    "python-jose[cryptography]",
+    "httpx",
+    "bcrypt",
+    "psycopg[binary]",
+    "cryptography",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest",
+    "pytest-asyncio",
+    "httpx",
+]
+
+[tool.uv.sources]
+xinyi-platform = { path = "../xinyi-platform" }
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+markers = [
+    "integration: real docupipe runs (slow, skipped by default)",
+]
+addopts = "-m 'not integration'"

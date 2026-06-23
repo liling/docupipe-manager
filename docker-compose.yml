@@ -1,0 +1,16 @@
+services:
+  docupipe-manager:
+    build: .
+    ports:
+      - "8002:8002"
+    env_file: .env
+    volumes:
+      - ./data:/var/lib/docupipe-manager
+      - /tmp:/tmp
+    networks:
+      - default
+      - hindsight_default
+
+networks:
+  hindsight_default:
+    external: true

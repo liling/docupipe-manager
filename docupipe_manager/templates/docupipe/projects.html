@@ -1,0 +1,66 @@
+{% extends "base.html" %}
+{% block title %}项目列表{% endblock %}
+{% block content %}
+<div class="content-header">
+    <h2>项目列表</h2>
+    <div class="content-header-actions">
+        <a href="/docupipe/projects/new" class="btn btn-primary">新建项目</a>
+    </div>
+</div>
+
+{% if stats %}
+<div class="card" style="margin-bottom:20px;padding:16px 24px;display:flex;gap:32px;font-size:14px;">
+    <span>项目: <strong>{{ stats.project_count }}</strong></span>
+    <span>活跃凭证: <strong>{{ stats.active_credentials }}</strong></span>
+    <span>今日运行: <strong>{{ stats.today_runs }}</strong></span>
+    <span{% if stats.failed_today > 0 %} style="color:var(--danger);font-weight:600;"{% endif %}>
+        失败: <strong>{{ stats.failed_today }}</strong>
+    </span>
+</div>
+{% endif %}
+
+{% if projects %}
+<table class="data-table">
+    <thead>
+        <tr>
+            <th>名称</th>
+            <th>Slug</th>
+            <th>凭证</th>
+            <th>Cron</th>
+            <th>上次运行</th>
+            <th>状态</th>
+            <th>操作</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for p in projects %}
+        <tr>
+            <td><a href="/docupipe/projects/{{ p.id }}/edit" style="font-weight:600;">{{ p.name }}</a></td>
+            <td><code>{{ p.slug }}</code></td>
+            <td>{{ p.credential_name or '—' }}</td>
+            <td><code>{{ p.schedule_cron or '—' }}</code></td>
+            <td>
+                {% if p.last_run_status == 'succeeded' %}
+                <span class="badge badge-success">成功</span>
+                {% elif p.last_run_status == 'failed' %}
+                <span class="badge badge-danger">失败</span>
+                {% elif p.last_run_status %}
+                <span class="badge badge-default">{{ p.last_run_status }}</span>
+                {% else %}
+                —
+                {% endif %}
+            </td>
+            <td><span class="badge badge-{{ 'success' if p.status == 'active' else 'default' }}">{{ p.status }}</span></td>
+            <td class="action-cell">
+                <a href="/docupipe/projects/{{ p.id }}/edit" class="btn btn-ghost btn-sm">编辑</a>
+            </td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% else %}
+<div class="card">
+    <p class="empty-state">暂无项目。<a href="/docupipe/projects/new">创建第一个项目</a></p>
+</div>
+{% endif %}
+{% endblock %}
