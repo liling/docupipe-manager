@@ -52,6 +52,7 @@ function finalize(end) {
   tag.className = "status-tag " + statusTagClass(end.status);
   document.getElementById("run-exit-code").textContent =
     end.exit_code === null || end.exit_code === undefined ? "—" : end.exit_code;
+  document.getElementById("run-cancel").classList.add("hidden");
 }
 
 const es = new EventSource(`/api/runs/${runId}/stream`);

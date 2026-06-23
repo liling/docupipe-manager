@@ -193,4 +193,3 @@ code {
     word-break: break-word;
 }
 .console .log-line { display: block; }
-.console .log-line.is-stderr { color: #ff8b8b; }
