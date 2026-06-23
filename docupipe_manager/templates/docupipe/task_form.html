@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="container max-w-2xl" data-project-id="{{ project_id }}" data-task-id="{{ task_id or '' }}">
+  <h1 class="text-2xl font-bold mb-4">{{ '编辑任务' if task_id else '新建任务' }}</h1>
+  <form id="task-form" class="space-y-3">
+    <input name="name" placeholder="任务名" class="input" required>
+    <input name="slug" placeholder="slug (a-z0-9-)" pattern="[a-z0-9-]+" class="input" required>
+    <textarea name="description" placeholder="描述" class="input"></textarea>
+    <label class="block text-sm font-medium">config.yaml</label>
+    <textarea name="config_yaml" rows="12" class="input font-mono" required>pipelines:
+  - name: default</textarea>
+    <div>
+      <label class="block text-sm font-medium">凭证</label>
+      <select name="credential_id" class="input"><option value="">（无）</option></select>
+    </div>
+    <div class="grid grid-cols-2 gap-3">
+      <input name="schedule_cron" placeholder="cron（如 0 3 * * *）" class="input">
+      <select name="schedule_mode" class="input">
+        <option value="incremental">incremental</option><option value="full">full</option><option value="mirror">mirror</option>
+      </select>
+    </div>
+    <input name="schedule_pipeline" placeholder="pipeline 名（可选）" class="input">
+    <label class="flex items-center gap-2"><input type="checkbox" name="schedule_enabled" checked> 启用调度</label>
+    <input type="hidden" name="credential_type" value="dws">
+    <div class="flex gap-2">
+      <button class="btn btn-primary">保存</button>
+      <a class="btn" href="/docupipe/projects/{{ project_id }}">取消</a>
+    </div>
+  </form>
+</div>
+<script src="/static/js/task_form.js"></script>
+{% endblock %}
