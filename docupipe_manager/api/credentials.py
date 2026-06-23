@@ -5,6 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
 from docupipe_manager.api.projects import _require_access_async
+from docupipe_manager.models.dws_credential import CredentialStatus
 
 router = APIRouter(prefix="/api/projects/{project_id}/credentials", tags=["credentials"])
 
@@ -22,7 +23,7 @@ async def list_credentials(project_id: uuid.UUID, user: dict = Depends(_require_
         {"id": str(c.id), "name": c.name, "corp_id": c.corp_id, "status": c.status.value,
          "token_expires_at": str(c.token_expires_at) if c.token_expires_at else None,
          "created_at": str(c.created_at)}
-        for c in creds if c.status != "revoked"
+        for c in creds if c.status != CredentialStatus.revoked
     ]
 
 
