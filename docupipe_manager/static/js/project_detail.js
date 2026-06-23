@@ -41,7 +41,12 @@ async function loadTasks() {
     </div>`).join("") + `</div>`;
   box.querySelectorAll(".trigger").forEach(b => b.addEventListener("click", async () => {
     const r = await fetch(`/api/projects/${pid}/tasks/${b.dataset.id}/trigger`, {method: "POST", headers: {"Content-Type": "application/json"}, body: "{}"});
-    alert(r.ok ? "已触发" : "触发失败");
+    if (r.ok) {
+      const data = await r.json();
+      location.href = `/docupipe/runs/${data.run_id}`;
+    } else {
+      alert("触发失败");
+    }
   }));
 }
 
@@ -215,7 +220,7 @@ async function loadRuns() {
 
   box.innerHTML = '<div class="stack">' +
     allRuns.slice(0, 50).map(run => `
-      <div class="card-row">
+      <a class="card-row" href="/docupipe/runs/${run.id}">
         <div class="card-row-main">
           <span class="card-row-title">${run.task_name}</span>
           <span class="card-row-meta-inline">${run.pipeline_name || "default"} · ${run.mode}</span>
@@ -224,7 +229,7 @@ async function loadRuns() {
           <span class="status-tag ${statusTagClass(run.status)}">${run.status}</span>
           <span class="card-row-meta-inline">${run.started_at ? new Date(run.started_at).toLocaleString() : ""}</span>
         </div>
-      </div>`).join("") +
+      </a>`).join("") +
     '</div>';
 }
 
