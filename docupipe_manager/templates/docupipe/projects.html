@@ -1,15 +1,17 @@
 {% extends "base.html" %}
+{% block title %}项目{% endblock %}
 {% block content %}
-<div class="container">
-  <div class="flex justify-between items-center mb-4">
-    <h1 class="text-2xl font-bold">项目</h1>
-    {% if current_user.role == "admin" %}
-    <a href="/docupipe/projects/new" class="btn btn-primary">创建项目</a>
-    {% endif %}
-  </div>
-  <div id="project-list" class="space-y-2">
-    <p class="text-gray-500">加载中...</p>
-  </div>
+<div class="content-header">
+    <h2>项目</h2>
+    <div class="content-header-actions">
+        {% if current_user.role == "admin" %}
+        <a href="/docupipe/projects/new" class="btn btn-primary">创建项目</a>
+        {% endif %}
+    </div>
+</div>
+
+<div id="project-list" class="stack">
+    <div class="empty-state">加载中...</div>
 </div>
 <script>
 async function loadProjects() {
@@ -17,16 +19,16 @@ async function loadProjects() {
   const projects = await r.json();
   const box = document.getElementById("project-list");
   if (!projects.length) {
-    box.innerHTML = '<p class="text-gray-500">暂无可见的项目。</p>';
+    box.innerHTML = '<div class="empty-state">暂无可见的项目。</div>';
     return;
   }
   box.innerHTML = projects.map(p => `
-    <a href="/docupipe/projects/${p.id}" class="block card p-4 hover:shadow">
-      <div class="flex justify-between">
-        <span class="font-semibold">${p.name}</span>
-        <span class="text-sm ${p.status === 'active' ? 'text-green-600' : 'text-gray-400'}">${p.status}</span>
+    <a href="/docupipe/projects/${p.id}" class="card-row">
+      <div class="card-row-main">
+        <div><span class="card-row-title">${p.name}</span></div>
+        ${p.description ? `<div class="card-row-meta">${p.description}</div>` : ""}
       </div>
-      ${p.description ? `<p class="text-sm text-gray-600 mt-1">${p.description}</p>` : ""}
+      <span class="status-tag ${p.status === 'active' ? 'is-success' : ''}">${p.status}</span>
     </a>`).join("");
 }
 loadProjects();

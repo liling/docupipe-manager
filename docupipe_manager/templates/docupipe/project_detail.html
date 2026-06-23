@@ -1,13 +1,26 @@
 {% extends "base.html" %}
+{% block title %}{{ "创建项目" if mode == "new" else "项目详情" }}{% endblock %}
 {% block content %}
-<div class="container" data-project-id="{{ project_id or '' }}" data-mode="{{ mode }}">
+<div data-project-id="{{ project_id or '' }}" data-mode="{{ mode }}">
   {% if mode == "new" %}
-  <h1 class="text-2xl font-bold mb-4">创建项目</h1>
-  <form id="project-form" class="space-y-3 max-w-lg">
-    <input name="name" placeholder="项目名" class="input" required>
-    <input name="slug" placeholder="slug (a-z0-9-)" pattern="[a-z0-9-]+" class="input" required>
-    <textarea name="description" placeholder="描述（可选）" class="input"></textarea>
-    <button class="btn btn-primary">创建</button>
+  <div class="content-header"><h2>创建项目</h2></div>
+  <form id="project-form" class="card" style="max-width:520px">
+    <div class="form-group">
+      <label>项目名</label>
+      <input name="name" placeholder="项目名" class="form-control" required>
+    </div>
+    <div class="form-group">
+      <label>slug</label>
+      <input name="slug" placeholder="slug (a-z0-9-)" pattern="[a-z0-9-]+" class="form-control" required>
+      <span class="text-muted">URL 中使用的唯一标识，只能包含小写字母、数字、横线。</span>
+    </div>
+    <div class="form-group">
+      <label>描述（可选）</label>
+      <textarea name="description" placeholder="描述（可选）" class="form-control"></textarea>
+    </div>
+    <div class="form-actions">
+      <button class="btn btn-primary">创建</button>
+    </div>
   </form>
   <script>
     document.getElementById("project-form").addEventListener("submit", async (e) => {
@@ -22,11 +35,13 @@
     });
   </script>
   {% else %}
-  <div class="flex items-center gap-3 mb-4">
-    <h1 id="proj-name" class="text-2xl font-bold">加载中...</h1>
-    <span id="proj-status" class="text-sm text-gray-500"></span>
+  <div class="content-header">
+    <h2><span id="proj-name">加载中...</span> <span id="proj-status" class="status-tag"></span></h2>
+    <div class="content-header-actions">
+      <a href="/docupipe/projects" class="btn btn-secondary">返回列表</a>
+    </div>
   </div>
-  <div class="tabs mb-4">
+  <div class="tabs">
     <button class="tab tab-active" data-tab="tasks">任务</button>
     <button class="tab" data-tab="credentials">凭证</button>
     <button class="tab" data-tab="members">成员</button>

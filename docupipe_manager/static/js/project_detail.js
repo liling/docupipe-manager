@@ -1,30 +1,44 @@
 const pid = document.querySelector("[data-project-id]").dataset.projectId;
 
+function statusTagClass(status) {
+  if (status === "succeeded" || status === "active" || status === "success") return "is-success";
+  if (status === "failed" || status === "error") return "is-failed";
+  if (status === "running" || status === "pending") return "is-running";
+  return "";
+}
+
 async function loadProject() {
   const r = await fetch(`/api/projects/${pid}`);
   if (!r.ok) { location.href = "/docupipe/projects"; return; }
   const p = await r.json();
   document.getElementById("proj-name").textContent = p.name;
-  document.getElementById("proj-status").textContent = p.status;
+  const tag = document.getElementById("proj-status");
+  tag.textContent = p.status;
+  tag.className = "status-tag " + statusTagClass(p.status);
 }
 
 async function loadTasks() {
   const r = await fetch(`/api/projects/${pid}/tasks`);
   const tasks = await r.json();
   const box = document.getElementById("tab-tasks");
-  if (!tasks.length) { box.innerHTML = '<p class="text-gray-500">无任务。<a class="link" href="/docupipe/projects/'+pid+'/tasks/new">新建任务</a></p>'; return; }
-  box.innerHTML = `<div class="mb-2"><a class="btn btn-sm btn-primary" href="/docupipe/projects/${pid}/tasks/new">新建任务</a></div>` +
+  if (!tasks.length) {
+    box.innerHTML = `<div class="empty-state">无任务。<a href="/docupipe/projects/${pid}/tasks/new">新建任务</a></div>`;
+    return;
+  }
+  box.innerHTML =
+    `<div style="margin-bottom:10px"><a class="btn btn-sm btn-primary" href="/docupipe/projects/${pid}/tasks/new">新建任务</a></div>` +
+    `<div class="stack">` +
     tasks.map(t => `
-    <div class="card p-3 flex justify-between items-center">
-      <div>
-        <a class="font-semibold" href="/docupipe/projects/${pid}/tasks/${t.id}/edit">${t.name}</a>
-        <span class="text-xs text-gray-500 ml-2">${t.schedule_cron || "手动"} · ${t.schedule_mode}</span>
+    <div class="card-row">
+      <div class="card-row-main">
+        <a class="card-row-title" href="/docupipe/projects/${pid}/tasks/${t.id}/edit" style="text-decoration:none">${t.name}</a>
+        <span class="card-row-meta-inline">${t.schedule_cron || "手动"} · ${t.schedule_mode}</span>
       </div>
-      <div class="flex gap-2 items-center">
-        ${t.last_run_status ? `<span class="text-xs">${t.last_run_status}</span>` : ""}
-        <button class="btn btn-sm trigger" data-id="${t.id}">触发</button>
+      <div class="card-row-actions">
+        ${t.last_run_status ? `<span class="status-tag ${statusTagClass(t.last_run_status)}">${t.last_run_status}</span>` : ""}
+        <button class="btn btn-sm btn-secondary trigger" data-id="${t.id}">触发</button>
       </div>
-    </div>`).join("");
+    </div>`).join("") + `</div>`;
   box.querySelectorAll(".trigger").forEach(b => b.addEventListener("click", async () => {
     const r = await fetch(`/api/projects/${pid}/tasks/${b.dataset.id}/trigger`, {method: "POST", headers: {"Content-Type": "application/json"}, body: "{}"});
     alert(r.ok ? "已触发" : "触发失败");
@@ -36,20 +50,20 @@ async function loadCredentials() {
   const creds = await r.json();
   const box = document.getElementById("tab-credentials");
 
-  let html = '<div class="mb-2"><button class="btn btn-sm btn-primary" id="device-start">添加凭证（设备码）</button></div>';
-  html += '<div id="device-flow" class="hidden card p-4 mb-4 space-y-2"></div>';
+  let html = '<div style="margin-bottom:10px"><button class="btn btn-sm btn-primary" id="device-start">添加凭证（设备码）</button></div>';
+  html += '<div id="device-flow" class="hidden card device-flow"></div>';
 
   if (!creds.length) {
-    html += '<p class="text-gray-500">暂无凭证。</p>';
+    html += '<div class="empty-state">暂无凭证。</div>';
   } else {
     html += '<table class="data-table"><thead><tr><th>名称</th><th>CorpId</th><th>状态</th><th>过期时间</th><th>操作</th></tr></thead><tbody>';
     for (const c of creds) {
       html += `<tr>
         <td>${c.name}</td>
-        <td><code>${c.corp_id || "—"}</code></td>
-        <td>${c.status}</td>
+        <td>${c.corp_id ? `<code>${c.corp_id}</code>` : "—"}</td>
+        <td><span class="status-tag ${statusTagClass(c.status)}">${c.status}</span></td>
         <td>${c.token_expires_at || "—"}</td>
-        <td><button class="btn btn-sm btn-danger revoke-cred" data-id="${c.id}">吊销</button></td>
+        <td class="action-cell"><button class="btn btn-sm btn-danger revoke-cred" data-id="${c.id}">吊销</button></td>
       </tr>`;
     }
     html += '</tbody></table>';
@@ -63,26 +77,26 @@ async function loadCredentials() {
     if (!name) return;
     const flowBox = document.getElementById("device-flow");
     flowBox.classList.remove("hidden");
-    flowBox.innerHTML = '<p class="text-gray-500">启动设备登录...</p>';
+    flowBox.innerHTML = '<p class="card-row-meta">启动设备登录...</p>';
     try {
       const r = await fetch(`/api/projects/${pid}/credentials/device-login/start?name=${encodeURIComponent(name)}`);
-      if (!r.ok) { flowBox.innerHTML = '<p class="text-red-500">启动失败</p>'; return; }
+      if (!r.ok) { flowBox.innerHTML = '<p class="status-tag is-failed">启动失败</p>'; return; }
       const data = await r.json();
       sessionKey = data.session_key;
       flowBox.innerHTML = `
         <p>请在浏览器中打开以下链接并输入验证码：</p>
-        <p><a href="${data.verification_url}" target="_blank" class="link">${data.verification_url}</a></p>
-        <p class="font-bold text-lg">验证码：<code>${data.user_code}</code></p>
-        <p class="text-xs text-gray-500">有效期 ${data.expires_in || 300} 秒</p>
-        <div class="flex gap-2 mt-2">
+        <p><a href="${data.verification_url}" target="_blank">${data.verification_url}</a></p>
+        <p>验证码：<span class="device-code">${data.user_code}</span></p>
+        <p class="device-hint">有效期 ${data.expires_in || 300} 秒</p>
+        <div class="form-actions">
           <button class="btn btn-sm btn-primary" id="device-poll">已完成，验证</button>
           <button class="btn btn-sm btn-secondary" id="device-cancel">取消</button>
         </div>
       `;
       document.getElementById("device-poll").addEventListener("click", async () => {
-        flowBox.innerHTML = '<p class="text-gray-500">验证中...</p>';
+        flowBox.innerHTML = '<p class="card-row-meta">验证中...</p>';
         const pollR = await fetch(`/api/projects/${pid}/credentials/device-login/poll?session_key=${sessionKey}`);
-        if (!pollR.ok) { flowBox.innerHTML = '<p class="text-red-500">验证失败或已过期，请重试</p>'; return; }
+        if (!pollR.ok) { flowBox.innerHTML = '<p class="status-tag is-failed">验证失败或已过期，请重试</p>'; return; }
         const pollData = await pollR.json();
         if (pollData.status === "authorized") {
           const finalR = await fetch(`/api/projects/${pid}/credentials/device-login/finalize`, {
@@ -91,20 +105,20 @@ async function loadCredentials() {
             body: JSON.stringify({session_key: sessionKey, name}),
           });
           if (finalR.ok) {
-            flowBox.innerHTML = '<p class="text-green-600">✅ 凭证添加成功！</p>';
+            flowBox.innerHTML = '<p class="status-tag is-success">✅ 凭证添加成功！</p>';
             loadCredentials();
           } else {
-            flowBox.innerHTML = '<p class="text-red-500">最终验证失败</p>';
+            flowBox.innerHTML = '<p class="status-tag is-failed">最终验证失败</p>';
           }
         } else {
-          flowBox.innerHTML = '<p class="text-orange-500">尚未授权，请在钉钉中扫码确认</p>';
+          flowBox.innerHTML = '<p class="status-tag is-running">尚未授权，请在钉钉中扫码确认</p>';
         }
       });
       document.getElementById("device-cancel").addEventListener("click", () => {
         flowBox.classList.add("hidden");
       });
     } catch (e) {
-      flowBox.innerHTML = '<p class="text-red-500">请求失败</p>';
+      flowBox.innerHTML = '<p class="status-tag is-failed">请求失败</p>';
     }
   });
 
@@ -124,28 +138,28 @@ async function loadMembers() {
   const data = await mr.json();
   const box = document.getElementById("tab-members");
 
-  let html = `<div class="card p-3 mb-2">
-    <span class="font-semibold">${data.owner.username || data.owner.user_id}</span>
-    <span class="text-xs text-gray-500 ml-2">所有者</span>
+  let html = `<div class="stack">`;
+  html += `<div class="card-row">
+    <div class="card-row-main"><span class="card-row-title">${data.owner.username || data.owner.user_id}</span></div>
+    <span class="status-tag is-success">所有者</span>
   </div>`;
 
   if (data.members.length) {
     for (const m of data.members) {
-      html += `<div class="card p-3 mb-2 flex justify-between items-center">
-        <span>${m.username || m.user_id}</span>
-        <div class="flex gap-2 items-center">
-          <span class="text-xs text-gray-500">${m.created_at}</span>
+      html += `<div class="card-row">
+        <div class="card-row-main"><span class="card-row-title">${m.username || m.user_id}</span></div>
+        <div class="card-row-actions">
+          <span class="card-row-meta-inline">${m.created_at}</span>
           ${isOwner ? `<button class="btn btn-sm btn-danger remove-member" data-id="${m.user_id}">移除</button>` : ""}
         </div>
       </div>`;
     }
-  } else {
-    html += '<p class="text-gray-500">暂无成员</p>';
   }
+  html += `</div>`;
 
   if (isOwner) {
-    html += `<div class="mt-4 flex gap-2">
-      <input id="member-user-id" placeholder="用户 ID" class="input">
+    html += `<div class="member-lookup-row" style="margin-top:16px">
+      <input id="member-user-id" placeholder="用户 ID" class="form-control">
       <button class="btn btn-sm btn-primary" id="add-member-btn">添加成员</button>
     </div>`;
   }
@@ -178,7 +192,7 @@ async function loadRuns() {
   const tasksRes = await fetch(`/api/projects/${pid}/tasks`);
   const tasks = await tasksRes.json();
   if (!tasks.length) {
-    box.innerHTML = '<p class="text-gray-500">暂无运行记录。</p>';
+    box.innerHTML = '<div class="empty-state">暂无运行记录。</div>';
     return;
   }
 
@@ -193,22 +207,22 @@ async function loadRuns() {
   }
 
   if (!allRuns.length) {
-    box.innerHTML = '<p class="text-gray-500">暂无运行记录。</p>';
+    box.innerHTML = '<div class="empty-state">暂无运行记录。</div>';
     return;
   }
 
   allRuns.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
 
-  box.innerHTML = '<div class="space-y-2">' +
+  box.innerHTML = '<div class="stack">' +
     allRuns.slice(0, 50).map(run => `
-      <div class="card p-3 flex justify-between items-center">
-        <div>
-          <span class="font-semibold">${run.task_name}</span>
-          <span class="text-xs text-gray-500 ml-2">${run.pipeline_name || "default"} · ${run.mode}</span>
+      <div class="card-row">
+        <div class="card-row-main">
+          <span class="card-row-title">${run.task_name}</span>
+          <span class="card-row-meta-inline">${run.pipeline_name || "default"} · ${run.mode}</span>
         </div>
-        <div class="flex gap-2 items-center">
-          <span class="text-xs ${run.status === 'succeeded' ? 'text-green-600' : run.status === 'failed' ? 'text-red-600' : 'text-gray-400'}">${run.status}</span>
-          <span class="text-xs text-gray-400">${run.started_at ? new Date(run.started_at).toLocaleString() : ""}</span>
+        <div class="card-row-actions">
+          <span class="status-tag ${statusTagClass(run.status)}">${run.status}</span>
+          <span class="card-row-meta-inline">${run.started_at ? new Date(run.started_at).toLocaleString() : ""}</span>
         </div>
       </div>`).join("") +
     '</div>';
