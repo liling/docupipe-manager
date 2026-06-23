@@ -360,3 +360,8 @@ async def test_do_execute_runs_without_credential(runner_service, tmp_path):
     # command_text 已持久化在 running 的 update 里
     update_call = sessions[1].execute.call_args[0][0]
     assert "command_text" in str(update_call.compile())
+    # --state-dir/--log-level 是 docupipe 顶层选项，必须出现在 run 子命令之前
+    args = list(mock_sub.call_args_list[0][0])
+    run_idx = args.index("run")
+    assert "--state-dir" in args[:run_idx]
+    assert "--log-level" in args[:run_idx]

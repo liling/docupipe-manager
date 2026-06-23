@@ -186,11 +186,12 @@ class RunnerService:
                 await import_proc.communicate()
 
             cmd = [
-                settings.docupipe_python, "-m", "docupipe", "run",
-                "--config", config_path,
+                settings.docupipe_python, "-m", "docupipe",
                 "--state-dir", state_dir,
-                "--mode", mode,
                 "--log-level", "INFO",
+                "run",
+                "--config", config_path,
+                "--mode", mode,
             ]
             if pipeline_name:
                 cmd.extend(["--pipeline", pipeline_name])
