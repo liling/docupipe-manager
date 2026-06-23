@@ -144,6 +144,7 @@ from docupipe_manager.api.pages import router as pages_router
 from docupipe_manager.api.projects import admin_router as projects_admin_router, router as projects_router
 from docupipe_manager.api.credentials import router as credentials_router
 from docupipe_manager.api.runs import router as runs_router
+from docupipe_manager.api.members import router as members_router
 from docupipe_manager.api.stats import router as stats_router
 
 app.include_router(auth_router)
@@ -152,6 +153,7 @@ app.include_router(projects_router)
 app.include_router(projects_admin_router)
 app.include_router(credentials_router)
 app.include_router(runs_router)
+app.include_router(members_router)
 app.include_router(stats_router)
 
 
