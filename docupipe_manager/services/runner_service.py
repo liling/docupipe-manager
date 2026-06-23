@@ -219,6 +219,7 @@ class RunnerService:
                 )
                 await session.commit()
 
+            max_bytes = self._settings.run_log_max_bytes
             with open(log_path, "w") as log_file:
                 while True:
                     line = await proc.stdout.readline()
@@ -227,6 +228,9 @@ class RunnerService:
                     text = line.decode("utf-8", errors="replace")
                     log_file.write(text)
                     log_file.flush()
+                    if log_file.tell() > max_bytes:
+                        log_file.truncate(max_bytes // 2)
+                        log_file.seek(0, 2)
                     self._broadcast(run_id, text.rstrip("\n"))
 
             exit_code = await proc.wait()

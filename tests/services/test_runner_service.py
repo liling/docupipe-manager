@@ -1,3 +1,4 @@
+import os
 import uuid
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -201,3 +202,81 @@ async def test_do_execute_flushes_and_broadcasts_each_line(runner_service, tmp_p
     # SQLAlchemy update 语句的 compile 取 text 太重，改为断言 command_text 在 values
     compiled = update_call.compile()
     assert "command_text" in str(compiled)
+
+
+@pytest.mark.asyncio
+async def test_do_execute_truncates_log_file_at_max_bytes(runner_service, tmp_path):
+    """验证日志文件超过 max_bytes 后被截断到 max_bytes//2，且全部行仍被广播。"""
+    rid = uuid.uuid4()
+    task_id = uuid.uuid4()
+
+    run_mock = MagicMock()
+    run_mock.id = rid
+    run_mock.task_id = task_id
+    run_mock.mode = "incremental"
+    run_mock.pipeline_name = None
+    task_mock = MagicMock()
+    task_mock.id = task_id
+    task_mock.credential_id = uuid.uuid4()
+    task_mock.credential_type = CredentialType.dws
+    task_mock.config_yaml = "k: v"
+    task_mock.slug = "demo"
+    cred_mock = MagicMock()
+    cred_mock.auth_blob = MagicMock()
+    cred_mock.auth_blob.hex = MagicMock(return_value="00" * 16)
+
+    sessions = [MagicMock(), MagicMock(), MagicMock(), MagicMock()]
+    idx = {"i": 0}
+
+    def fake_factory():
+        s = sessions[idx["i"]]
+        idx["i"] += 1
+        cm = MagicMock()
+        cm.__aenter__ = AsyncMock(return_value=s)
+        cm.__aexit__ = AsyncMock(return_value=None)
+        return cm
+
+    sessions[0].get = AsyncMock(side_effect=[run_mock, task_mock, cred_mock])
+    sessions[1].execute = AsyncMock()
+    sessions[1].commit = AsyncMock()
+    sessions[2].execute = AsyncMock()
+    sessions[2].commit = AsyncMock()
+    sessions[3].execute = AsyncMock()
+    sessions[3].commit = AsyncMock()
+    runner_service._session_factory = fake_factory
+    runner_service._settings.data_dir = str(tmp_path / "data")
+    runner_service._settings.run_log_max_bytes = 64  # 小上限，便于触发截断
+
+    home_dir = tmp_path / "home"
+    home_dir.mkdir(exist_ok=True)
+
+    # 每行 >10 字节，共 20 行 → 远超 64 字节
+    lines = [b"this-is-a-long-line-XX\n"] * 20
+
+    with patch("docupipe_manager.services.runner_service.decrypt_sm4", return_value="auth"), \
+         patch("docupipe_manager.services.runner_service.mkdtemp", return_value=str(home_dir)), \
+         patch("asyncio.create_subprocess_exec", new=AsyncMock()) as mock_sub:
+        proc1 = MagicMock()
+        proc1.communicate = AsyncMock(return_value=(b"", b""))
+        proc2 = MagicMock()
+        proc2.stdout.readline = AsyncMock(side_effect=lines + [b""])
+        proc2.wait = AsyncMock(return_value=0)
+        proc2.pid = 12345
+        mock_sub.side_effect = [proc1, proc2]
+
+        _, queue = runner_service.subscribe(rid)
+        await runner_service._do_execute(rid)
+
+    # 全部 20 行都被广播
+    broadcast_count = 0
+    while not queue.empty():
+        line = queue.get_nowait()
+        assert line is not None
+        broadcast_count += 1
+    assert broadcast_count == 20
+
+    # 磁盘日志文件被截断到 ≤ cap
+    log_path = os.path.join(str(tmp_path / "data"), "tasks", str(task_id), "runs", f"{rid}.log")
+    with open(log_path, "rb") as f:
+        content = f.read()
+    assert len(content) <= 64
