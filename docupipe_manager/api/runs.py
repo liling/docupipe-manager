@@ -1,3 +1,5 @@
+import asyncio
+import json
 import uuid
 from typing import Optional
 
@@ -111,28 +113,58 @@ async def list_runs(
     }
 
 
-@router.get("/{run_id}")
-async def get_run(
-    run_id: uuid.UUID,
-    user: dict = Depends(get_current_user),
-):
-    run = await _verify_run_access(run_id, user)
+async def _run_detail(run_id: uuid.UUID) -> dict:
+    from sqlalchemy import select
+    from docupipe_manager.models.pipeline_run import PipelineRun
+    from docupipe_manager.models.task import Task
+
+    engine = _get_engine()
+    async with engine.begin() as conn:
+        run = (await conn.execute(
+            select(PipelineRun).where(PipelineRun.id == run_id)
+        )).scalar_one_or_none()
+        task = None
+        if run is not None:
+            task = (await conn.execute(
+                select(Task).where(Task.id == run.task_id)
+            )).scalar_one_or_none()
+
+    if run is None:
+        return {}
+
+    def _v(x):
+        return x.value if hasattr(x, "value") else x
 
     return {
         "id": str(run.id),
         "task_id": str(run.task_id),
-        "trigger_type": run.trigger_type.value if hasattr(run.trigger_type, "value") else run.trigger_type,
+        "task_name": task.name if task else None,
+        "project_id": str(task.project_id) if task else None,
+        "trigger_type": _v(run.trigger_type),
         "triggered_by": str(run.triggered_by) if run.triggered_by else None,
         "pipeline_name": run.pipeline_name,
         "mode": run.mode,
-        "status": run.status.value if hasattr(run.status, "value") else run.status,
+        "status": _v(run.status),
         "exit_code": run.exit_code,
+        "command_text": run.command_text,
         "started_at": str(run.started_at) if run.started_at else None,
         "completed_at": str(run.completed_at) if run.completed_at else None,
         "error_message": run.error_message,
         "log_path": run.log_path,
         "created_at": str(run.created_at),
     }
+
+
+@router.get("/{run_id}")
+async def get_run(
+    run_id: uuid.UUID,
+    user: dict = Depends(get_current_user),
+):
+    await _verify_run_access(run_id, user)
+    detail = await _run_detail(run_id)
+    if not detail:
+        raise HTTPException(status_code=404, detail="Run not found")
+    return detail
 
 
 @router.get("/{run_id}/log")
@@ -159,6 +191,56 @@ async def get_run_log(
         "truncated": len(lines) > tail,
         "total_bytes": total_bytes,
     }
+
+
+def _sse(event: str, payload) -> str:
+    return f"event: {event}\ndata: {json.dumps(payload)}\n\n"
+
+
+@router.get("/{run_id}/stream")
+async def stream_run(run_id: uuid.UUID, user: dict = Depends(get_current_user)):
+    from fastapi.responses import StreamingResponse
+    from docupipe_manager.main import app
+
+    await _verify_run_access(run_id, user)
+    runner = app.state.runner
+
+    async def event_stream():
+        meta = await _run_detail(run_id)
+        log_path = meta.get("log_path")
+        yield _sse("meta", meta)
+
+        if runner.is_active(run_id):
+            history, queue = runner.subscribe(run_id)
+            try:
+                for line in history:
+                    yield _sse("log", line)
+                while True:
+                    try:
+                        line = await asyncio.wait_for(queue.get(), timeout=15)
+                    except asyncio.TimeoutError:
+                        yield ": keepalive\n\n"
+                        continue
+                    if line is None:  # sentinel
+                        break
+                    yield _sse("log", line)
+            finally:
+                runner.unsubscribe(run_id, queue)
+        elif log_path:
+            try:
+                with open(log_path) as f:
+                    for line in f:
+                        yield _sse("log", line.rstrip("\n"))
+            except FileNotFoundError:
+                pass
+
+        final = await _run_detail(run_id)
+        yield _sse("end", {
+            "status": final.get("status"),
+            "exit_code": final.get("exit_code"),
+        })
+
+    return StreamingResponse(event_stream(), media_type="text/event-stream")
 
 
 @router.get("/{run_id}/download-log")

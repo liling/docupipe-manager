@@ -85,3 +85,100 @@ async def test_cancel_run(async_client):
         assert r.status_code == 200
         assert r.json()["status"] == "cancelled"
     clear_overrides()
+
+
+@pytest.mark.asyncio
+async def test_get_run_includes_command_and_task_name(async_client):
+    rid = uuid.uuid4()
+    run_mock = MagicMock()
+    run_mock.id = rid
+    run_mock.task_id = uuid.uuid4()
+    run_mock.trigger_type = "manual"
+    run_mock.triggered_by = None
+    run_mock.pipeline_name = None
+    run_mock.mode = "incremental"
+    run_mock.status = "succeeded"
+    run_mock.exit_code = 0
+    run_mock.started_at = None
+    run_mock.completed_at = None
+    run_mock.command_text = "python -m docupipe run"
+    run_mock.log_path = "/tmp/x.log"
+    run_mock.error_message = None
+    run_mock.created_at = "2026-06-23"
+    task_mock = MagicMock()
+    task_mock.name = "demo-task"
+    task_mock.project_id = uuid.uuid4()
+
+    override_get_current_user({"id": str(uuid.uuid4()), "role": "admin"})
+    with patch("docupipe_manager.main.app") as mock_app:
+        mock_conn = AsyncMock()
+        # _verify_run_access 查 run；_run_detail 再查 run + task
+        mock_conn.execute = AsyncMock(side_effect=[
+            MagicMock(scalar_one_or_none=MagicMock(return_value=run_mock)),  # access
+            MagicMock(scalar_one_or_none=MagicMock(return_value=run_mock)),  # detail run
+            MagicMock(scalar_one_or_none=MagicMock(return_value=task_mock)), # detail task
+        ])
+        mock_engine = MagicMock()
+        mock_engine.begin.return_value.__aenter__ = AsyncMock(return_value=mock_conn)
+        mock_engine.begin.return_value.__aexit__ = AsyncMock(return_value=None)
+        mock_app.state.engine = mock_engine
+
+        r = await async_client.get(f"/api/runs/{rid}")
+        assert r.status_code == 200
+        data = r.json()
+        assert data["command_text"] == "python -m docupipe run"
+        assert data["task_name"] == "demo-task"
+        assert "project_id" in data
+    clear_overrides()
+
+
+@pytest.mark.asyncio
+async def test_stream_completed_run_reads_file(async_client, tmp_path):
+    rid = uuid.uuid4()
+    log_file = tmp_path / "run.log"
+    log_file.write_text("alpha\nbeta\n")
+
+    run_mock = MagicMock()
+    run_mock.id = rid
+    run_mock.task_id = uuid.uuid4()
+    run_mock.trigger_type = "manual"
+    run_mock.triggered_by = None
+    run_mock.pipeline_name = None
+    run_mock.mode = "incremental"
+    run_mock.status = "succeeded"
+    run_mock.exit_code = 0
+    run_mock.command_text = "cmd"
+    run_mock.started_at = None
+    run_mock.completed_at = None
+    run_mock.log_path = str(log_file)
+    run_mock.error_message = None
+    run_mock.created_at = "2026-06-23"
+    task_mock = MagicMock()
+    task_mock.name = "t"
+    task_mock.project_id = uuid.uuid4()
+
+    override_get_current_user({"id": str(uuid.uuid4()), "role": "admin"})
+    with patch("docupipe_manager.main.app") as mock_app:
+        mock_conn = AsyncMock()
+        mock_conn.execute = AsyncMock(side_effect=[
+            MagicMock(scalar_one_or_none=MagicMock(return_value=run_mock)),  # access
+            MagicMock(scalar_one_or_none=MagicMock(return_value=run_mock)),  # detail(meta)
+            MagicMock(scalar_one_or_none=MagicMock(return_value=task_mock)),
+            MagicMock(scalar_one_or_none=MagicMock(return_value=run_mock)),  # detail(end)
+            MagicMock(scalar_one_or_none=MagicMock(return_value=task_mock)),
+        ])
+        mock_engine = MagicMock()
+        mock_engine.begin.return_value.__aenter__ = AsyncMock(return_value=mock_conn)
+        mock_engine.begin.return_value.__aexit__ = AsyncMock(return_value=None)
+        mock_app.state.engine = mock_engine
+        runner = MagicMock()
+        runner.is_active = MagicMock(return_value=False)
+        mock_app.state.runner = runner
+
+        r = await async_client.get(f"/api/runs/{rid}/stream")
+        assert r.status_code == 200
+        text = r.text
+        assert "event: meta" in text
+        assert '"alpha"' in text and '"beta"' in text
+        assert "event: end" in text
+    clear_overrides()
