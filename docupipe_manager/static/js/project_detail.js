@@ -39,6 +39,7 @@ async function loadTasks() {
         <button class="btn btn-sm btn-secondary trigger" data-id="${t.id}">触发</button>
       </td>
     </tr>`).join("") + `</tbody></table>`;
+  box.innerHTML = html;
   box.querySelectorAll(".trigger").forEach(b => b.addEventListener("click", async () => {
     const r = await fetch(`${API_PREFIX}/api/projects/${pid}/tasks/${b.dataset.id}/trigger`, {method: "POST", headers: {"Content-Type": "application/json"}, body: "{}"});
     if (r.ok) {
