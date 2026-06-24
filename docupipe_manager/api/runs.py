@@ -53,6 +53,7 @@ async def list_runs(
     from sqlalchemy import func, select, text
     from docupipe_manager.models.pipeline_run import PipelineRun
     from docupipe_manager.models.task import Task
+    from docupipe_manager.models.project import Project
 
     engine = _get_engine()
 
@@ -91,8 +92,15 @@ async def list_runs(
             count_q = count_q.where(*conditions)
         total = (await conn.execute(count_q)).scalar() or 0
 
-        q = select(PipelineRun, Task.name.label("task_name")).join(
+        q = select(
+            PipelineRun,
+            Task.name.label("task_name"),
+            Project.id.label("proj_id"),
+            Project.name.label("project_name"),
+        ).join(
             Task, PipelineRun.task_id == Task.id, isouter=not bool(project_id)
+        ).join(
+            Project, Task.project_id == Project.id, isouter=True
         ).order_by(PipelineRun.created_at.desc())
         if conditions:
             q = q.where(*conditions)
@@ -108,6 +116,8 @@ async def list_runs(
                 "id": str(r.id),
                 "task_id": str(r.task_id),
                 "task_name": r.task_name,
+                "project_id": str(r.proj_id) if r.proj_id else None,
+                "project_name": r.project_name,
                 "trigger_type": r.trigger_type.value if hasattr(r.trigger_type, "value") else r.trigger_type,
                 "pipeline_name": r.pipeline_name,
                 "mode": r.mode,
