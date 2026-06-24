@@ -117,8 +117,8 @@ class CredentialService:
             stdout, _ = await status_proc.communicate()
             status_data = json.loads(stdout.decode()) if stdout else {}
             corp_id = status_data.get("corp_id", "")
-            token_expires_at_str = status_data.get("token_expires_at")
-            refresh_expires_at_str = status_data.get("refresh_token_expires_at")
+            token_expires_at_str = status_data.get("expires_at")
+            refresh_expires_at_str = status_data.get("refresh_expires_at")
 
             export_path = os.path.join(home_dir, "dws-export.b64")
             export_proc = await asyncio.create_subprocess_exec(
@@ -179,8 +179,8 @@ class CredentialService:
             name=name,
             corp_id=meta.get("corp_id", ""),
             auth_blob=bytes.fromhex(auth_blob_hex),
-            token_expires_at=_parse_dt(meta.get("token_expires_at")),
-            refresh_token_expires_at=_parse_dt(meta.get("refresh_token_expires_at")),
+            token_expires_at=_parse_dt(meta.get("expires_at")),
+            refresh_token_expires_at=_parse_dt(meta.get("refresh_expires_at")),
             credential_type=CredentialType.dws,
             status=CredentialStatus.active,
             created_by=user_id,
@@ -271,8 +271,8 @@ class CredentialService:
                     "token_expires_at": None, "refresh_token_expires_at": None, "error": str(e)}
 
         corp_id = meta.get("corp_id") or ""
-        token_exp = _parse_dt(meta.get("token_expires_at"))
-        refresh_exp = _parse_dt(meta.get("refresh_token_expires_at"))
+        token_exp = _parse_dt(meta.get("expires_at"))
+        refresh_exp = _parse_dt(meta.get("refresh_expires_at"))
         now = datetime.now(timezone.utc)
         new_status = (CredentialStatus.expired
                       if (refresh_exp is not None and refresh_exp < now)

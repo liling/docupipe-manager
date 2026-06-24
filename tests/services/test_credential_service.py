@@ -77,8 +77,8 @@ async def test_probe_auth_blob_import_fails(credential_service):
 @pytest.mark.asyncio
 async def test_create_from_import_success(credential_service):
     pid = uuid.uuid4(); uid = uuid.uuid4()
-    meta = {"corp_id": "corp-x", "token_expires_at": "2026-12-31T00:00:00Z",
-            "refresh_token_expires_at": "2027-01-01T00:00:00Z"}
+    meta = {"corp_id": "corp-x", "expires_at": "2026-12-31T00:00:00Z",
+            "refresh_expires_at": "2027-01-01T00:00:00Z"}
     captured = {}
     with patch.object(credential_service, "_probe_auth_blob", AsyncMock(return_value=meta)):
         with patch.object(credential_service, "_session_factory") as mock_sf:
@@ -118,7 +118,7 @@ async def test_finalize_login_persists_expires(credential_service):
 
     status_proc = AsyncMock()
     status_proc.communicate = AsyncMock(
-        return_value=(b'{"corp_id":"c1","token_expires_at":"2026-12-31T00:00:00Z","refresh_token_expires_at":"2027-01-01T00:00:00Z"}', b"")
+        return_value=(b'{"corp_id":"c1","expires_at":"2026-12-31T00:00:00Z","refresh_expires_at":"2027-01-01T00:00:00Z"}', b"")
     )
     export_proc = AsyncMock()
     export_proc.returncode = 0
@@ -158,8 +158,8 @@ async def test_check_status_writes_back_active(credential_service):
     cred = MagicMock()
     cred.id = cid; cred.project_id = pid; cred.corp_id = "old"
     cred.auth_blob = b"\x00"
-    meta = {"corp_id": "new-corp", "token_expires_at": "2099-12-31T00:00:00Z",
-            "refresh_token_expires_at": "2099-12-31T00:00:00Z"}
+    meta = {"corp_id": "new-corp", "expires_at": "2099-12-31T00:00:00Z",
+            "refresh_expires_at": "2099-12-31T00:00:00Z"}
     with patch.object(credential_service, "_session_factory") as mock_sf:
         ms = AsyncMock(); ms.__aenter__.return_value = ms
         ms.get = AsyncMock(return_value=cred)
@@ -179,7 +179,7 @@ async def test_check_status_writes_back_active(credential_service):
 async def test_check_status_refresh_expired(credential_service):
     pid = uuid.uuid4(); cid = uuid.uuid4()
     cred = MagicMock(); cred.id = cid; cred.project_id = pid; cred.auth_blob = b"\x00"
-    meta = {"corp_id": "c", "refresh_token_expires_at": "2000-01-01T00:00:00Z"}
+    meta = {"corp_id": "c", "refresh_expires_at": "2000-01-01T00:00:00Z"}
     with patch.object(credential_service, "_session_factory") as mock_sf:
         ms = AsyncMock(); ms.__aenter__.return_value = ms
         ms.get = AsyncMock(return_value=cred); ms.commit = AsyncMock()
