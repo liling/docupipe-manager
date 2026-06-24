@@ -90,10 +90,10 @@ async function loadCredentials() {
     const btn = e.currentTarget;
     const old = btn.textContent; btn.textContent = "测试中..."; btn.disabled = true;
     const tr = await fetch(`/api/projects/${pid}/credentials/${b.dataset.id}/test`, {method: "POST"});
+    if (!tr.ok) { alert("请求失败"); btn.textContent = old; btn.disabled = false; loadCredentials(); return; }
     const data = await tr.json();
-    if (!tr.ok) { alert("请求失败"); btn.textContent = old; btn.disabled = false; return; }
-    if (data.error) { alert("凭证不可用：" + data.error); }
-    else { alert("凭证可用，状态: " + (data.status || "active")); }
+    btn.textContent = old; btn.disabled = false;
+    showTestResult(data);
     loadCredentials();
   }));
 }
@@ -422,6 +422,26 @@ async function showEnvEditor(varId) {
     if (r.ok) { dialog.close(); refreshEnvList(); }
     else { const j = await r.json(); alert(j.detail || "保存失败"); }
   });
+}
+
+function showTestResult(data) {
+  let d = document.getElementById("test-result-dialog");
+  if (!d) { d = document.createElement("dialog"); d.id = "test-result-dialog"; document.body.appendChild(d); }
+  const statusCls = data.status === "active" ? "is-success" : "is-failed";
+  const errorHtml = data.error ? `<p class="is-failed status-tag" style="margin-top:8px">${data.error}</p>` : "";
+  d.innerHTML = `
+    <h3 style="margin:0 0 12px">凭证测试结果</h3>
+    <table class="data-table">
+      <tr><td>状态</td><td><span class="status-tag ${statusCls}">${data.status || "?"}</span></td></tr>
+      <tr><td>CorpId</td><td><code>${data.corp_id || "—"}</code></td></tr>
+      <tr><td>Access 过期</td><td>${fmtExpires(data.token_expires_at)}</td></tr>
+      <tr><td>Refresh 过期</td><td class="text-muted">${fmtExpires(data.refresh_token_expires_at)}</td></tr>
+    </table>
+    ${errorHtml}
+    <div class="form-actions" style="margin-top:12px"><button class="btn btn-sm btn-primary" id="test-result-close">关闭</button></div>`;
+  d.showModal();
+  d.querySelector("#test-result-close").onclick = () => d.close();
+  d.onclick = (e) => { if (e.target === d) d.close(); };
 }
 
 loadProject(); loadTasks(); loadEnvVars(); loadCredentials(); loadMembers(); loadRuns();
