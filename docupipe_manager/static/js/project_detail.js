@@ -27,11 +27,12 @@ async function loadTasks() {
   }
   box.innerHTML =
     `<div style="margin-bottom:10px"><a class="btn btn-sm btn-primary" href="/docupipe/projects/${pid}/tasks/new">新建任务</a></div>` +
-    `<table class="data-table"><thead><tr><th>名称</th><th>调度</th><th>上次状态</th><th>操作</th></tr></thead><tbody>` +
+    `<table class="data-table"><thead><tr><th>名称</th><th>Slug</th><th>调度</th><th>上次状态</th><th>操作</th></tr></thead><tbody>` +
     tasks.map(t => `
     <tr>
-      <td>${t.name}</td>
-      <td>${t.schedule_cron || "手动"} · ${t.schedule_mode}</td>
+      <td>${t.name} <span class="card-row-meta-inline">${t.schedule_mode}</span></td>
+      <td><code>${t.slug}</code></td>
+      <td>${t.schedule_cron || "手动"}</td>
       <td>${t.last_run_status ? `<span class="status-tag ${statusTagClass(t.last_run_status)}">${t.last_run_status}</span>` : "—"}</td>
       <td class="action-cell">
         <a class="btn btn-sm btn-secondary" href="/docupipe/projects/${pid}/tasks/${t.id}/edit">编辑</a>
