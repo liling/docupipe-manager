@@ -52,6 +52,9 @@ function finalize(end) {
   tag.className = "status-tag " + statusTagClass(end.status);
   document.getElementById("run-exit-code").textContent =
     end.exit_code === null || end.exit_code === undefined ? "—" : end.exit_code;
+  document.getElementById("run-command").textContent = end.command_text || "—";
+  document.getElementById("run-started-at").textContent = end.started_at || "—";
+  document.getElementById("run-completed-at").textContent = end.completed_at || "—";
   document.getElementById("run-cancel").classList.add("hidden");
 }
 

@@ -244,6 +244,9 @@ async def stream_run(run_id: uuid.UUID, user: dict = Depends(get_current_user)):
         yield _sse("end", {
             "status": final.get("status"),
             "exit_code": final.get("exit_code"),
+            "command_text": final.get("command_text"),
+            "started_at": final.get("started_at"),
+            "completed_at": final.get("completed_at"),
         })
 
     return StreamingResponse(event_stream(), media_type="text/event-stream")
