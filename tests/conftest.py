@@ -27,6 +27,7 @@ os.environ.setdefault("DOCUPIPE_MANAGER_DATA_DIR", "/tmp/docupipe-test")
 def _make_test_app(state: dict | None = None):
     """Create a FastAPI app instance for tests — lifespan disabled, app.state pre-set."""
     from docupipe_manager.main import app
+    from docupipe_manager.platform.cache import UserLRUCache
     app.router.lifespan_context = None
     app.state.platform_client = AsyncMock()
     app.state.platform_client.exchange_oauth_code = AsyncMock(return_value={
@@ -38,6 +39,7 @@ def _make_test_app(state: dict | None = None):
         "access_token": "new-access-token",
         "refresh_token": "new-refresh-token",
     })
+    app.state.user_cache = UserLRUCache(ttl_seconds=30)
     if state:
         for k, v in state.items():
             setattr(app.state, k, v)

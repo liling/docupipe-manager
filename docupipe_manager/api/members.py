@@ -14,6 +14,44 @@ class AddMemberRequest(BaseModel):
     username: str | None = None
 
 
+def _resolve_user(info: dict | None) -> dict:
+    if info is None:
+        return {"username": "", "display_name": "", "email": "", "role": ""}
+    return {
+        "username": info.get("username", "") or "",
+        "display_name": info.get("display_name", "") or "",
+        "email": info.get("email", "") or "",
+        "role": info.get("role", "") or "",
+    }
+
+
+async def _fetch_users(user_ids: list[str]) -> dict[str, dict]:
+    from docupipe_manager.main import app
+    cache = app.state.user_cache
+    uuids = [uuid.UUID(uid) for uid in user_ids]
+    miss_ids: list[uuid.UUID] = []
+    result: dict[str, dict] = {}
+    for uid in uuids:
+        cached = cache.get(uid)
+        if cached is not None:
+            result[str(uid)] = cached
+        else:
+            miss_ids.append(uid)
+    if miss_ids:
+        try:
+            fetched = await app.state.platform_client.batch_get_users(miss_ids)
+            for uid, info in fetched.items():
+                if info is not None:
+                    cache.set(uid, info)
+                    result[str(uid)] = info
+                else:
+                    result[str(uid)] = {"username": "", "display_name": "", "email": "", "role": ""}
+        except Exception:
+            for uid in miss_ids:
+                result.setdefault(str(uid), {"username": "", "display_name": "", "email": "", "role": ""})
+    return result
+
+
 @router.get("")
 async def list_members(project_id: uuid.UUID, user: dict = Depends(_require_access_async)):
     from sqlalchemy import text
@@ -28,17 +66,19 @@ async def list_members(project_id: uuid.UUID, user: dict = Depends(_require_acce
             WHERE project_id = :pid ORDER BY created_at
         """), {"pid": str(project_id)})).fetchall()
     all_ids = {str(owner.owner_id)} | {str(m.user_id) for m in members}
-    from docupipe_manager.main import app
-    names = {}
-    try:
-        names = await app.state.platform_client.batch_get_users(list(all_ids))
-    except Exception:
-        pass
+    users = await _fetch_users(list(all_ids))
+    owner_info = users.get(str(owner.owner_id), {})
     return {
-        "owner": {"user_id": str(owner.owner_id), "username": names.get(str(owner.owner_id), ""), "is_owner": True},
+        "owner": {
+            "user_id": str(owner.owner_id), "is_owner": True,
+            **_resolve_user(owner_info),
+        },
         "members": [
-            {"user_id": str(m.user_id), "username": names.get(str(m.user_id), ""),
-             "added_by": str(m.added_by), "created_at": str(m.created_at)}
+            {
+                "user_id": str(m.user_id),
+                "added_by": str(m.added_by), "created_at": str(m.created_at),
+                **_resolve_user(users.get(str(m.user_id))),
+            }
             for m in members
         ],
     }
@@ -72,6 +112,20 @@ async def add_member(project_id: uuid.UUID, body: AddMemberRequest,
             )
         )
     return {"status": "added", "user_id": body.user_id}
+
+
+users_router = APIRouter(prefix="/api/users", tags=["users"])
+
+
+@users_router.get("/search")
+async def search_platform_users(q: str = ""):
+    from docupipe_manager.main import app
+    if not q.strip():
+        return []
+    try:
+        return await app.state.platform_client.search_users(q.strip())
+    except Exception:
+        return []
 
 
 @router.delete("/{user_id}")

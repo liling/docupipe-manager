@@ -34,15 +34,21 @@ async def test_list_members(async_client):
         mock_engine.begin.return_value.__aexit__ = AsyncMock(return_value=None)
         mock_ge.return_value = mock_engine
         app.state.platform_client.batch_get_users = AsyncMock(return_value={
-            str(owner_id): "owner", str(member_id): "member",
+            owner_id: {"username": "owner", "display_name": "Owner", "email": "owner@x.com", "role": "admin"},
+            member_id: {"username": "member", "display_name": "Member", "email": "member@x.com", "role": "user"},
         })
         r = await async_client.get(f"/api/projects/{pid}/members")
         assert r.status_code == 200
         data = r.json()
         assert data["owner"]["user_id"] == str(owner_id)
         assert data["owner"]["is_owner"] is True
+        assert data["owner"]["username"] == "owner"
+        assert data["owner"]["display_name"] == "Owner"
+        assert data["owner"]["email"] == "owner@x.com"
         assert len(data["members"]) == 1
         assert data["members"][0]["user_id"] == str(member_id)
+        assert data["members"][0]["username"] == "member"
+        assert data["members"][0]["display_name"] == "Member"
     clear_overrides()
 
 

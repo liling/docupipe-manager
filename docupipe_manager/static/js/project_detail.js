@@ -217,6 +217,17 @@ function startDeviceFlow(area, dialog) {
     .catch(() => { area.innerHTML = '<p class="status-tag is-failed">启动设备登录失败</p>'; });
 }
 
+function displayName(user) {
+  return user.display_name || user.username || user.user_id;
+}
+
+function userSubtitle(user) {
+  const parts = [];
+  if (user.username) parts.push(`@${user.username}`);
+  if (user.email) parts.push(user.email);
+  return parts.join(" · ");
+}
+
 async function loadMembers() {
   const r = await fetch(`/api/projects/${pid}`);
   const project = await r.json();
@@ -228,14 +239,20 @@ async function loadMembers() {
 
   let html = `<div class="stack">`;
   html += `<div class="card-row">
-    <div class="card-row-main"><span class="card-row-title">${data.owner.username || data.owner.user_id}</span></div>
+    <div class="card-row-main">
+      <span class="card-row-title">${displayName(data.owner)}</span>
+      <span class="card-row-meta">${userSubtitle(data.owner)}</span>
+    </div>
     <span class="status-tag is-success">所有者</span>
   </div>`;
 
   if (data.members.length) {
     for (const m of data.members) {
       html += `<div class="card-row">
-        <div class="card-row-main"><span class="card-row-title">${m.username || m.user_id}</span></div>
+        <div class="card-row-main">
+          <span class="card-row-title">${displayName(m)}</span>
+          <span class="card-row-meta">${userSubtitle(m)}</span>
+        </div>
         <div class="card-row-actions">
           <span class="card-row-meta-inline">${m.created_at}</span>
           ${isOwner ? `<button class="btn btn-sm btn-danger remove-member" data-id="${m.user_id}">移除</button>` : ""}
@@ -247,23 +264,69 @@ async function loadMembers() {
 
   if (isOwner) {
     html += `<div class="member-lookup-row" style="margin-top:16px">
-      <input id="member-user-id" placeholder="用户 ID" class="form-control">
-      <button class="btn btn-sm btn-primary" id="add-member-btn">添加成员</button>
+      <input id="member-search-input" placeholder="搜索用户名、姓名、邮箱..." class="form-control" autocomplete="off">
+      <div id="member-search-results" class="search-results-dropdown" style="display:none;position:absolute;background:#fff;border:1px solid #ddd;border-radius:6px;width:100%;max-height:240px;overflow-y:auto;z-index:100;margin-top:2px;box-shadow:0 4px 12px rgba(0,0,0,.1)"></div>
     </div>`;
   }
 
   box.innerHTML = html;
 
   if (isOwner) {
-    document.getElementById("add-member-btn")?.addEventListener("click", async () => {
-      const userId = document.getElementById("member-user-id").value.trim();
-      if (!userId) return;
-      const r = await fetch(`/api/projects/${pid}/members`, {
-        method: "POST",
-        headers: {"Content-Type": "application/json"},
-        body: JSON.stringify({user_id: userId}),
-      });
-      if (r.ok) { loadMembers(); } else { alert((await r.json()).detail || "添加失败"); }
+    let searchTimer = null;
+    const input = document.getElementById("member-search-input");
+    const resultsEl = document.getElementById("member-search-results");
+
+    input.addEventListener("input", () => {
+      clearTimeout(searchTimer);
+      const q = input.value.trim();
+      if (q.length < 1) { resultsEl.style.display = "none"; return; }
+      searchTimer = setTimeout(async () => {
+        const rr = await fetch(`/api/users/search?q=${encodeURIComponent(q)}`);
+        if (!rr.ok) return;
+        const users = await rr.json();
+        if (!users.length) {
+          resultsEl.innerHTML = '<div style="padding:8px 12px;color:#999">未找到用户</div>';
+          resultsEl.style.display = "";
+          return;
+        }
+        resultsEl.innerHTML = users.map(u => `
+          <div class="search-result-item" style="padding:8px 12px;cursor:pointer;border-bottom:1px solid #f0f0f0;display:flex;justify-content:space-between;align-items:center"
+               data-id="${u.id}">
+            <div>
+              <div><strong>${displayName(u)}</strong></div>
+              <div class="card-row-meta">@${u.username}${u.email ? " · " + u.email : ""}</div>
+            </div>
+            <button class="btn btn-sm btn-primary add-search-result" data-id="${u.id}" style="flex-shrink:0">添加</button>
+          </div>
+        `).join("");
+        resultsEl.style.display = "";
+
+        resultsEl.querySelectorAll(".add-search-result").forEach(btn => {
+          btn.addEventListener("click", async (e) => {
+            e.stopPropagation();
+            const userId = btn.dataset.id;
+            const rr = await fetch(`/api/projects/${pid}/members`, {
+              method: "POST",
+              headers: {"Content-Type": "application/json"},
+              body: JSON.stringify({user_id: userId}),
+            });
+            if (rr.ok) {
+              resultsEl.style.display = "none";
+              input.value = "";
+              loadMembers();
+            } else {
+              alert((await rr.json()).detail || "添加失败");
+            }
+          });
+        });
+      }, 300);
+    });
+
+    input.addEventListener("blur", () => {
+      setTimeout(() => { resultsEl.style.display = "none"; }, 200);
+    });
+    input.addEventListener("focus", () => {
+      if (resultsEl.children.length) resultsEl.style.display = "";
     });
 
     box.querySelectorAll(".remove-member").forEach(b => b.addEventListener("click", async () => {

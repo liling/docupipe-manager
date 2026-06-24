@@ -30,7 +30,6 @@ class Settings(BaseSettings):
     host: str = "0.0.0.0"
     port: int = 8002
     base_url: str = "http://localhost:8002"
-    dev_mode: bool = False
 
     model_config = {"env_prefix": "DOCUPIPE_MANAGER_", "env_file": ".env", "extra": "ignore"}
 

@@ -83,6 +83,14 @@ class XinyiPlatformClient:
             out[uid] = v
         return out
 
+    async def search_users(self, query: str) -> list[dict]:
+        if not query.strip():
+            return []
+        result = await self._get_json(f"/internal/users/search?q={query}")
+        if result is None:
+            return []
+        return result.get("users", [])
+
     async def push_audit(self, event: dict) -> None:
         try:
             await self._post_json("/internal/audit", event)
