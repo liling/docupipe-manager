@@ -207,12 +207,20 @@ class CredentialService:
 
         home_dir = mkdtemp(prefix="dws-probe-")
         try:
+            # 先清理可能的残留会话
+            logout_proc = await asyncio.create_subprocess_exec(
+                self._settings.dws_cli_path, "auth", "logout",
+                stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+                env={**os.environ, "HOME": home_dir},
+            )
+            await logout_proc.communicate()
+
             import_path = os.path.join(home_dir, "auth.b64")
             with open(import_path, "w") as f:
                 f.write(auth_b64)
 
             import_proc = await asyncio.create_subprocess_exec(
-                self._settings.dws_cli_path, "auth", "import", "-i", import_path, "--base64",
+                self._settings.dws_cli_path, "auth", "import", "--base64", "-i", import_path,
                 stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
                 env={**os.environ, "HOME": home_dir},
             )
