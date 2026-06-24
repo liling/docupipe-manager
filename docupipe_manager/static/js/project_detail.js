@@ -55,83 +55,163 @@ async function loadCredentials() {
   const creds = await r.json();
   const box = document.getElementById("tab-credentials");
 
-  let html = '<div style="margin-bottom:10px"><button class="btn btn-sm btn-primary" id="device-start">添加凭证（设备码）</button></div>';
-  html += '<div id="device-flow" class="hidden card device-flow"></div>';
+  let html = '<div style="margin-bottom:10px"><button class="btn btn-sm btn-primary" id="cred-add">添加凭证</button></div>';
+  html += '<div id="cred-dialog-mount"></div>';
 
   if (!creds.length) {
     html += '<div class="empty-state">暂无凭证。</div>';
   } else {
-    html += '<table class="data-table"><thead><tr><th>名称</th><th>CorpId</th><th>状态</th><th>过期时间</th><th>操作</th></tr></thead><tbody>';
+    html += '<table class="data-table"><thead><tr><th>名称</th><th>类型</th><th>CorpId</th><th>状态</th><th>Access 过期</th><th>Refresh 过期</th><th>操作</th></tr></thead><tbody>';
     for (const c of creds) {
       html += `<tr>
         <td>${c.name}</td>
+        <td><span class="status-tag">${(c.credential_type || "dws").toUpperCase()}</span></td>
         <td>${c.corp_id ? `<code>${c.corp_id}</code>` : "—"}</td>
         <td><span class="status-tag ${statusTagClass(c.status)}">${c.status}</span></td>
-        <td>${c.token_expires_at || "—"}</td>
-        <td class="action-cell"><button class="btn btn-sm btn-danger revoke-cred" data-id="${c.id}">吊销</button></td>
+        <td>${fmtExpires(c.token_expires_at)}</td>
+        <td class="text-muted">${fmtExpires(c.refresh_token_expires_at)}</td>
+        <td class="action-cell">
+          <button class="btn btn-sm btn-secondary test-cred" data-id="${c.id}">测试</button>
+          <button class="btn btn-sm btn-danger revoke-cred" data-id="${c.id}">吊销</button>
+        </td>
       </tr>`;
     }
     html += '</tbody></table>';
   }
   box.innerHTML = html;
 
-  let sessionKey = null;
+  document.getElementById("cred-add").addEventListener("click", () => showCredentialDialog());
+  box.querySelectorAll(".revoke-cred").forEach(b => b.addEventListener("click", async () => {
+    if (!confirm("确认吊销此凭证？")) return;
+    const rr = await fetch(`/api/projects/${pid}/credentials/${b.dataset.id}`, {method: "DELETE"});
+    if (rr.ok) { loadCredentials(); } else { alert("吊销失败"); }
+  }));
+  box.querySelectorAll(".test-cred").forEach(b => b.addEventListener("click", async (e) => {
+    const btn = e.currentTarget;
+    const old = btn.textContent; btn.textContent = "测试中..."; btn.disabled = true;
+    const tr = await fetch(`/api/projects/${pid}/credentials/${b.dataset.id}/test`, {method: "POST"});
+    const data = await tr.json();
+    if (!tr.ok) { alert("测试失败"); btn.textContent = old; btn.disabled = false; return; }
+    if (data.error) { alert("测试失败：" + data.error); }
+    loadCredentials();
+  }));
+}
 
-  document.getElementById("device-start").addEventListener("click", async () => {
-    const name = prompt("请输入凭证名称：");
-    if (!name) return;
-    const flowBox = document.getElementById("device-flow");
-    flowBox.classList.remove("hidden");
-    flowBox.innerHTML = '<p class="card-row-meta">启动设备登录...</p>';
-    try {
-      const r = await fetch(`/api/projects/${pid}/credentials/device-login/start?name=${encodeURIComponent(name)}`);
-      if (!r.ok) { flowBox.innerHTML = '<p class="status-tag is-failed">启动失败</p>'; return; }
-      const data = await r.json();
+function fmtExpires(s) {
+  if (!s) return "—";
+  const dt = new Date(s);
+  if (isNaN(dt)) return s;
+  const now = new Date();
+  const diff = dt - now;
+  const abs = Math.abs(diff);
+  const days = Math.floor(abs / 86400000);
+  const hours = Math.floor((abs % 86400000) / 3600000);
+  const rel = diff >= 0 ? `还剩 ${days}天${hours}h` : `已过期 ${days}天${hours}h`;
+  const cls = diff < 0 ? "is-failed" : (abs < 86400000 ? "is-running" : "");
+  return `<span class="status-tag ${cls}">${dt.toLocaleString()} · ${rel}</span>`;
+}
+
+function showCredentialDialog() {
+  let dialog = document.getElementById("cred-dialog");
+  if (!dialog) {
+    dialog = document.createElement("dialog");
+    dialog.id = "cred-dialog";
+    document.body.appendChild(dialog);
+  }
+  dialog.innerHTML = `
+    <h3 style="margin:0 0 16px">添加凭证</h3>
+    <div class="form-group"><label>凭证类型</label>
+      <select id="cred-type" class="form-control"><option value="dws">DWS（钉钉）</option></select></div>
+    <div class="form-group"><label>创建方式</label>
+      <div class="check-row">
+        <label><input type="radio" name="cred-mode" value="import" checked> 导入已有凭证</label>
+        <label><input type="radio" name="cred-mode" value="device"> 设备码登录</label>
+      </div></div>
+    <div class="form-group"><label>凭证名称</label>
+      <input id="cred-name" class="form-control" placeholder="凭证名称"></div>
+    <div id="cred-import-area">
+      <div class="form-group"><label>粘贴 base64（dws auth export --base64 输出）</label>
+        <textarea id="cred-blob" class="form-control" rows="5" placeholder="粘贴 base64 文本"></textarea></div>
+      <div class="form-group"><label>或上传文件</label>
+        <input type="file" id="cred-file" class="form-control"></div>
+    </div>
+    <div id="cred-device-area" class="hidden"></div>
+    <div class="form-actions" style="margin-top:16px">
+      <button class="btn btn-sm btn-primary" id="cred-save">保存</button>
+      <button class="btn btn-sm btn-secondary" id="cred-cancel">取消</button>
+    </div>`;
+  dialog.showModal();
+
+  const importArea = dialog.querySelector("#cred-import-area");
+  const deviceArea = dialog.querySelector("#cred-device-area");
+  const saveBtn = dialog.querySelector("#cred-save");
+
+  dialog.querySelectorAll('input[name="cred-mode"]').forEach(r => r.addEventListener("change", () => {
+    const mode = dialog.querySelector('input[name="cred-mode"]:checked').value;
+    importArea.classList.toggle("hidden", mode !== "import");
+    deviceArea.classList.toggle("hidden", mode !== "device");
+    saveBtn.style.display = mode === "import" ? "" : "none";
+    if (mode === "device") startDeviceFlow(deviceArea, dialog);
+  }));
+
+  dialog.querySelector("#cred-file").addEventListener("change", (e) => {
+    const f = e.target.files[0];
+    if (!f) return;
+    const reader = new FileReader();
+    reader.onload = () => { dialog.querySelector("#cred-blob").value = reader.result; };
+    reader.readAsText(f);
+  });
+
+  dialog.querySelector("#cred-cancel").addEventListener("click", () => dialog.close());
+  dialog.addEventListener("click", (e) => { if (e.target === dialog) dialog.close(); });
+
+  saveBtn.addEventListener("click", async () => {
+    const name = dialog.querySelector("#cred-name").value.trim();
+    const auth_blob = dialog.querySelector("#cred-blob").value.trim();
+    if (!name) { alert("请输入凭证名称"); return; }
+    if (!auth_blob) { alert("请粘贴或上传凭证内容"); return; }
+    saveBtn.disabled = true;
+    const rr = await fetch(`/api/projects/${pid}/credentials/import`, {
+      method: "POST", headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({name, auth_blob}),
+    });
+    if (rr.ok) { dialog.close(); loadCredentials(); }
+    else { const j = await rr.json(); alert(j.detail || "导入失败"); saveBtn.disabled = false; }
+  });
+}
+
+function startDeviceFlow(area, dialog) {
+  let sessionKey = null;
+  area.innerHTML = '<p class="card-row-meta">启动设备登录...</p>';
+  fetch(`/api/projects/${pid}/credentials/device-login/start?name=${encodeURIComponent(dialog.querySelector("#cred-name").value || "dws-cred")}`)
+    .then(r => r.ok ? r.json() : Promise.reject())
+    .then(data => {
       sessionKey = data.session_key;
-      flowBox.innerHTML = `
-        <p>请在浏览器中打开以下链接并输入验证码：</p>
-        <p><a href="${data.verification_url}" target="_blank">${data.verification_url}</a></p>
+      area.innerHTML = `
+        <p>请在浏览器打开：<a href="${data.verification_url}" target="_blank">${data.verification_url}</a></p>
         <p>验证码：<span class="device-code">${data.user_code}</span></p>
         <p class="device-hint">有效期 ${data.expires_in || 300} 秒</p>
         <div class="form-actions">
-          <button class="btn btn-sm btn-primary" id="device-poll">已完成，验证</button>
-          <button class="btn btn-sm btn-secondary" id="device-cancel">取消</button>
-        </div>
-      `;
-      document.getElementById("device-poll").addEventListener("click", async () => {
-        flowBox.innerHTML = '<p class="card-row-meta">验证中...</p>';
-        const pollR = await fetch(`/api/projects/${pid}/credentials/device-login/poll?session_key=${sessionKey}`);
-        if (!pollR.ok) { flowBox.innerHTML = '<p class="status-tag is-failed">验证失败或已过期，请重试</p>'; return; }
-        const pollData = await pollR.json();
-        if (pollData.status === "authorized") {
-          const finalR = await fetch(`/api/projects/${pid}/credentials/device-login/finalize`, {
-            method: "POST",
-            headers: {"Content-Type": "application/json"},
-            body: JSON.stringify({session_key: sessionKey, name}),
+          <button class="btn btn-sm btn-primary" id="df-poll">已完成，验证</button>
+        </div>`;
+      area.querySelector("#df-poll").addEventListener("click", async () => {
+        area.innerHTML = '<p class="card-row-meta">验证中...</p>';
+        const pr = await fetch(`/api/projects/${pid}/credentials/device-login/poll?session_key=${sessionKey}`);
+        if (!pr.ok) { area.innerHTML = '<p class="status-tag is-failed">验证失败或已过期</p>'; return; }
+        const pd = await pr.json();
+        if (pd.status === "success" || pd.status === "authorized") {
+          const fr = await fetch(`/api/projects/${pid}/credentials/device-login/finalize`, {
+            method: "POST", headers: {"Content-Type": "application/json"},
+            body: JSON.stringify({session_key: sessionKey, name: dialog.querySelector("#cred-name").value || "dws-cred"}),
           });
-          if (finalR.ok) {
-            flowBox.innerHTML = '<p class="status-tag is-success">✅ 凭证添加成功！</p>';
-            loadCredentials();
-          } else {
-            flowBox.innerHTML = '<p class="status-tag is-failed">最终验证失败</p>';
-          }
+          if (fr.ok) { dialog.close(); loadCredentials(); }
+          else { area.innerHTML = '<p class="status-tag is-failed">最终验证失败</p>'; }
         } else {
-          flowBox.innerHTML = '<p class="status-tag is-running">尚未授权，请在钉钉中扫码确认</p>';
+          area.innerHTML = '<p class="status-tag is-running">尚未授权，请在钉钉扫码确认</p>';
         }
       });
-      document.getElementById("device-cancel").addEventListener("click", () => {
-        flowBox.classList.add("hidden");
-      });
-    } catch (e) {
-      flowBox.innerHTML = '<p class="status-tag is-failed">请求失败</p>';
-    }
-  });
-
-  box.querySelectorAll(".revoke-cred").forEach(b => b.addEventListener("click", async () => {
-    if (!confirm("确认吊销此凭证？")) return;
-    const r = await fetch(`/api/projects/${pid}/credentials/${b.dataset.id}`, {method: "DELETE"});
-    if (r.ok) { loadCredentials(); } else { alert("吊销失败"); }
-  }));
+    })
+    .catch(() => { area.innerHTML = '<p class="status-tag is-failed">启动设备登录失败</p>'; });
 }
 
 async function loadMembers() {
