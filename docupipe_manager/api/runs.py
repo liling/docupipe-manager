@@ -210,11 +210,14 @@ async def stream_run(run_id: uuid.UUID, user: dict = Depends(get_current_user)):
         log_path = meta.get("log_path")
         yield _sse("meta", meta)
 
+        had_logs = False
         if runner.is_active(run_id):
             history, queue = runner.subscribe(run_id)
             try:
-                for line in history:
-                    yield _sse("log", line)
+                if history:
+                    had_logs = True
+                    for line in history:
+                        yield _sse("log", line)
                 while True:
                     try:
                         line = await asyncio.wait_for(queue.get(), timeout=15)
@@ -223,10 +226,13 @@ async def stream_run(run_id: uuid.UUID, user: dict = Depends(get_current_user)):
                         continue
                     if line is None:  # sentinel
                         break
+                    had_logs = True
                     yield _sse("log", line)
             finally:
                 runner.unsubscribe(run_id, queue)
-        elif log_path:
+
+        # 竞态回退：缓冲已被 _close_subscribers 销毁时，从文件读取
+        if log_path and not had_logs:
             try:
                 with open(log_path) as f:
                     for line in f:
