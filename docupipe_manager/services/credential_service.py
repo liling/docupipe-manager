@@ -1,10 +1,12 @@
 import asyncio
+import binascii
 import json
 import logging
 import os
 import shutil
 import time
 import uuid
+from datetime import datetime
 from tempfile import mkdtemp
 
 from sqlalchemy import select
@@ -13,10 +15,21 @@ from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 from docupipe_manager.config import Settings
 from docupipe_manager.crypto import decrypt_sm4, encrypt_sm4
 from docupipe_manager.models.dws_credential import CredentialStatus, DwsCredential
+from docupipe_manager.models.task import CredentialType
 from sqlalchemy import not_
 from docupipe_manager.platform.client import XinyiPlatformClient
 
 logger = logging.getLogger(__name__)
+
+
+def _parse_dt(s: str | None) -> datetime | None:
+    """宽松解析 ISO 8601 字符串（兼容 'Z' 后缀）；失败返回 None。"""
+    if not s:
+        return None
+    try:
+        return datetime.fromisoformat(s.replace("Z", "+00:00"))
+    except (ValueError, TypeError):
+        return None
 
 
 class CredentialService:
@@ -127,8 +140,9 @@ class CredentialService:
             name=name,
             corp_id=corp_id,
             auth_blob=bytes.fromhex(auth_blob_hex),
-            token_expires_at=None,
-            refresh_token_expires_at=None,
+            token_expires_at=_parse_dt(token_expires_at_str),
+            refresh_token_expires_at=_parse_dt(refresh_expires_at_str),
+            credential_type=CredentialType.dws,
             status=CredentialStatus.active,
             created_by=user_id,
             project_id=project_id,
@@ -149,17 +163,15 @@ class CredentialService:
 
         return credential
 
-    async def check_status(self, credential_id: uuid.UUID, project_id: uuid.UUID) -> dict:
-        """Read credential from DB and check dws auth status in a temp HOME."""
-        async with self._session_factory() as db_session:
-            credential = await db_session.get(DwsCredential, credential_id)
-            if credential is None or credential.project_id != project_id:
-                raise ValueError("Credential not found")
+    async def _probe_auth_blob(self, auth_b64: str) -> dict:
+        """把 base64 auth 写入临时 HOME，import 后调 status，返回 status 元数据。
+        import 失败抛 ValueError；finally 清理临时目录。"""
+        try:
+            binascii.a2b_base64(auth_b64.encode("utf-8"))
+        except (binascii.Error, ValueError) as e:
+            raise ValueError(f"auth_blob 不是合法的 base64: {e}") from e
 
-        key_hex = self._settings.encryption_key
-        auth_b64 = decrypt_sm4(credential.auth_blob.hex(), key_hex)
-
-        home_dir = mkdtemp(prefix="dws-check-")
+        home_dir = mkdtemp(prefix="dws-probe-")
         try:
             import_path = os.path.join(home_dir, "auth.b64")
             with open(import_path, "w") as f:
@@ -170,19 +182,38 @@ class CredentialService:
                 stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
                 env={**os.environ, "HOME": home_dir},
             )
-            await import_proc.communicate()
+            try:
+                await asyncio.wait_for(import_proc.communicate(), timeout=30)
+            except asyncio.TimeoutError:
+                import_proc.kill()
+                raise ValueError("dws auth import 超时")
+            if import_proc.returncode != 0:
+                raise ValueError("dws auth import 失败：凭证无效")
 
             status_proc = await asyncio.create_subprocess_exec(
                 self._settings.dws_cli_path, "auth", "status", "--format", "json",
                 stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
                 env={**os.environ, "HOME": home_dir},
             )
-            stdout, _ = await status_proc.communicate()
-            status_data = json.loads(stdout.decode()) if stdout else {}
+            try:
+                stdout, _ = await asyncio.wait_for(status_proc.communicate(), timeout=30)
+            except asyncio.TimeoutError:
+                status_proc.kill()
+                raise ValueError("dws auth status 超时")
+            return json.loads(stdout.decode()) if stdout else {}
         finally:
             shutil.rmtree(home_dir, ignore_errors=True)
 
-        return status_data
+    async def check_status(self, credential_id: uuid.UUID, project_id: uuid.UUID) -> dict:
+        """读凭证并 import+status 探测（本任务仅返回，回写见 Task 4）。"""
+        async with self._session_factory() as db_session:
+            credential = await db_session.get(DwsCredential, credential_id)
+            if credential is None or credential.project_id != project_id:
+                raise ValueError("Credential not found")
+
+        key_hex = self._settings.encryption_key
+        auth_b64 = decrypt_sm4(credential.auth_blob.hex(), key_hex)
+        return await self._probe_auth_blob(auth_b64)
 
     async def revoke(self, credential_id: uuid.UUID, user_id: uuid.UUID, project_id: uuid.UUID) -> None:
         """Mark credential as revoked (soft delete)."""
