@@ -15,16 +15,37 @@ class FinalizeRequest(BaseModel):
     name: str = Field(..., min_length=1, max_length=255)
 
 
+class ImportRequest(BaseModel):
+    name: str = Field(..., min_length=1, max_length=255)
+    auth_blob: str = Field(..., min_length=1)
+
+
 @router.get("")
 async def list_credentials(project_id: uuid.UUID, user: dict = Depends(_require_access_async)):
     from docupipe_manager.main import app
     creds = await app.state.credential.list_credentials(project_id)
     return [
-        {"id": str(c.id), "name": c.name, "corp_id": c.corp_id, "status": c.status.value,
+        {"id": str(c.id), "name": c.name, "corp_id": c.corp_id,
+         "credential_type": c.credential_type.value,
+         "status": c.status.value,
          "token_expires_at": str(c.token_expires_at) if c.token_expires_at else None,
+         "refresh_token_expires_at": str(c.refresh_token_expires_at) if c.refresh_token_expires_at else None,
          "created_at": str(c.created_at)}
         for c in creds
     ]
+
+
+@router.post("/import")
+async def import_credential(project_id: uuid.UUID, body: ImportRequest,
+                            user: dict = Depends(_require_access_async)):
+    from docupipe_manager.main import app
+    try:
+        cred = await app.state.credential.create_from_import(
+            project_id, body.name, body.auth_blob, uuid.UUID(user["id"])
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return {"id": str(cred.id), "status": "active"}
 
 
 @router.post("/device-login/start")
@@ -51,9 +72,9 @@ async def finalize_device_login(project_id: uuid.UUID, body: FinalizeRequest,
     return {"id": str(cred.id), "status": "active"}
 
 
-@router.get("/{credential_id}/status")
-async def check_status(project_id: uuid.UUID, credential_id: uuid.UUID,
-                       user: dict = Depends(_require_access_async)):
+@router.post("/{credential_id}/test")
+async def test_credential(project_id: uuid.UUID, credential_id: uuid.UUID,
+                          user: dict = Depends(_require_access_async)):
     from docupipe_manager.main import app
     try:
         return await app.state.credential.check_status(credential_id, project_id)
