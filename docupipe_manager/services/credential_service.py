@@ -217,12 +217,16 @@ class CredentialService:
                 env={**os.environ, "HOME": home_dir},
             )
             try:
-                await asyncio.wait_for(import_proc.communicate(), timeout=30)
+                stdout, stderr = await asyncio.wait_for(import_proc.communicate(), timeout=30)
             except asyncio.TimeoutError:
                 import_proc.kill()
                 raise ValueError("dws auth import 超时")
             if import_proc.returncode != 0:
-                raise ValueError("dws auth import 失败：凭证无效")
+                detail = stderr.decode().strip() if stderr else ""
+                msg = "dws auth import 失败：凭证无效"
+                if detail:
+                    msg += f"（{detail}）"
+                raise ValueError(msg)
 
             status_proc = await asyncio.create_subprocess_exec(
                 self._settings.dws_cli_path, "auth", "status", "--format", "json",

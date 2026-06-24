@@ -143,7 +143,7 @@ async def test_finalize_login_persists_expires(credential_service):
                     with patch("docupipe_manager.services.credential_service.DwsCredential", FakeCred):
                         with patch.object(credential_service, "_session_factory") as mock_sf:
                             ms = AsyncMock(); ms.__aenter__.return_value = ms
-                            ms.add = AsyncMock(); ms.commit = AsyncMock(); ms.refresh = AsyncMock()
+                            ms.add = MagicMock(); ms.commit = AsyncMock(); ms.refresh = AsyncMock()
                             mock_sf.return_value = ms
                             await credential_service.finalize_login("sk", "n", uid, pid)
 

@@ -92,7 +92,7 @@ async function loadCredentials() {
     const tr = await fetch(`/api/projects/${pid}/credentials/${b.dataset.id}/test`, {method: "POST"});
     const data = await tr.json();
     if (!tr.ok) { alert("测试失败"); btn.textContent = old; btn.disabled = false; return; }
-    if (data.error) { alert("测试失败：" + data.error); }
+    if (data.error) { alert("测试失败：" + data.error); btn.textContent = old; btn.disabled = false; return; }
     loadCredentials();
   }));
 }
