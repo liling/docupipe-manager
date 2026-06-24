@@ -290,14 +290,15 @@ async function loadRuns() {
   }
 
   let html = `<p class="text-muted" style="margin:0 0 8px">共 ${data.total} 条记录</p>`;
-  html += '<table class="data-table"><thead><tr><th>任务</th><th>流水线</th><th>模式</th><th>状态</th><th>开始时间</th></tr></thead><tbody>';
+  html += '<table class="data-table"><thead><tr><th>任务</th><th>流水线</th><th>模式</th><th>状态</th><th>开始时间</th><th>操作</th></tr></thead><tbody>';
   for (const run of data.runs) {
     html += `<tr>
-      <td><a href="/docupipe/projects/${pid}/tasks/${run.task_id}/edit" style="text-decoration:none">${run.task_name || run.task_id.slice(0,8)}</a></td>
+      <td>${run.task_name || run.task_id.slice(0,8)}</td>
       <td>${run.pipeline_name || "default"}</td>
       <td>${run.mode}</td>
       <td><span class="status-tag ${statusTagClass(run.status)}">${run.status}</span></td>
       <td>${run.started_at ? new Date(run.started_at).toLocaleString() : "—"}</td>
+      <td class="action-cell"><a class="btn btn-sm btn-secondary" href="/docupipe/runs/${run.id}">详情</a></td>
     </tr>`;
   }
   html += '</tbody></table>';
