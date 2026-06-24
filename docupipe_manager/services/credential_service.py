@@ -6,7 +6,7 @@ import os
 import shutil
 import time
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from tempfile import mkdtemp
 
 from sqlalchemy import select
@@ -239,15 +239,46 @@ class CredentialService:
             shutil.rmtree(home_dir, ignore_errors=True)
 
     async def check_status(self, credential_id: uuid.UUID, project_id: uuid.UUID) -> dict:
-        """读凭证并 import+status 探测（本任务仅返回，回写见 Task 4）。"""
+        """测试凭证可用性并回写最新 corp_id/过期时间/status。"""
         async with self._session_factory() as db_session:
             credential = await db_session.get(DwsCredential, credential_id)
             if credential is None or credential.project_id != project_id:
                 raise ValueError("Credential not found")
+            key_hex = self._settings.encryption_key
+            auth_b64 = decrypt_sm4(credential.auth_blob.hex(), key_hex)
 
-        key_hex = self._settings.encryption_key
-        auth_b64 = decrypt_sm4(credential.auth_blob.hex(), key_hex)
-        return await self._probe_auth_blob(auth_b64)
+        try:
+            meta = await self._probe_auth_blob(auth_b64)
+        except ValueError as e:
+            async with self._session_factory() as db_session:
+                credential = await db_session.get(DwsCredential, credential_id)
+                credential.status = CredentialStatus.expired
+                await db_session.commit()
+            return {"status": "expired", "corp_id": credential.corp_id if credential else "",
+                    "token_expires_at": None, "refresh_token_expires_at": None, "error": str(e)}
+
+        corp_id = meta.get("corp_id") or ""
+        token_exp = _parse_dt(meta.get("token_expires_at"))
+        refresh_exp = _parse_dt(meta.get("refresh_token_expires_at"))
+        now = datetime.now(timezone.utc)
+        new_status = (CredentialStatus.expired
+                      if (refresh_exp is not None and refresh_exp < now)
+                      else CredentialStatus.active)
+
+        async with self._session_factory() as db_session:
+            credential = await db_session.get(DwsCredential, credential_id)
+            credential.corp_id = corp_id
+            if token_exp is not None:
+                credential.token_expires_at = token_exp
+            if refresh_exp is not None:
+                credential.refresh_token_expires_at = refresh_exp
+            credential.status = new_status
+            await db_session.commit()
+
+        return {"status": new_status.value, "corp_id": corp_id,
+                "token_expires_at": str(token_exp) if token_exp else None,
+                "refresh_token_expires_at": str(refresh_exp) if refresh_exp else None,
+                "error": None}
 
     async def revoke(self, credential_id: uuid.UUID, user_id: uuid.UUID, project_id: uuid.UUID) -> None:
         """Mark credential as revoked (soft delete)."""

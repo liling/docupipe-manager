@@ -150,3 +150,69 @@ async def test_finalize_login_persists_expires(credential_service):
     assert saved.get("token_expires_at") is not None
     assert saved.get("refresh_token_expires_at") is not None
     assert saved.get("credential_type") is not None
+
+
+@pytest.mark.asyncio
+async def test_check_status_writes_back_active(credential_service):
+    pid = uuid.uuid4(); cid = uuid.uuid4()
+    cred = MagicMock()
+    cred.id = cid; cred.project_id = pid; cred.corp_id = "old"
+    cred.auth_blob = b"\x00"
+    meta = {"corp_id": "new-corp", "token_expires_at": "2099-12-31T00:00:00Z",
+            "refresh_token_expires_at": "2099-12-31T00:00:00Z"}
+    with patch.object(credential_service, "_session_factory") as mock_sf:
+        ms = AsyncMock(); ms.__aenter__.return_value = ms
+        ms.get = AsyncMock(return_value=cred)
+        ms.commit = AsyncMock()
+        mock_sf.return_value = ms
+        with patch("docupipe_manager.services.credential_service.decrypt_sm4", return_value="b64"):
+            with patch.object(credential_service, "_probe_auth_blob", AsyncMock(return_value=meta)):
+                result = await credential_service.check_status(cid, pid)
+    assert result["status"] == "active"
+    assert result["corp_id"] == "new-corp"
+    assert result["error"] is None
+    assert cred.corp_id == "new-corp"
+    assert cred.status.value == "active"
+
+
+@pytest.mark.asyncio
+async def test_check_status_refresh_expired(credential_service):
+    pid = uuid.uuid4(); cid = uuid.uuid4()
+    cred = MagicMock(); cred.id = cid; cred.project_id = pid; cred.auth_blob = b"\x00"
+    meta = {"corp_id": "c", "refresh_token_expires_at": "2000-01-01T00:00:00Z"}
+    with patch.object(credential_service, "_session_factory") as mock_sf:
+        ms = AsyncMock(); ms.__aenter__.return_value = ms
+        ms.get = AsyncMock(return_value=cred); ms.commit = AsyncMock()
+        mock_sf.return_value = ms
+        with patch("docupipe_manager.services.credential_service.decrypt_sm4", return_value="b64"):
+            with patch.object(credential_service, "_probe_auth_blob", AsyncMock(return_value=meta)):
+                result = await credential_service.check_status(cid, pid)
+    assert result["status"] == "expired"
+
+
+@pytest.mark.asyncio
+async def test_check_status_import_error_marks_expired(credential_service):
+    pid = uuid.uuid4(); cid = uuid.uuid4()
+    cred = MagicMock(); cred.id = cid; cred.project_id = pid; cred.auth_blob = b"\x00"
+    cred.corp_id = "c"
+    with patch.object(credential_service, "_session_factory") as mock_sf:
+        ms = AsyncMock(); ms.__aenter__.return_value = ms
+        ms.get = AsyncMock(return_value=cred); ms.commit = AsyncMock()
+        mock_sf.return_value = ms
+        with patch("docupipe_manager.services.credential_service.decrypt_sm4", return_value="b64"):
+            with patch.object(credential_service, "_probe_auth_blob",
+                              AsyncMock(side_effect=ValueError("import failed"))):
+                result = await credential_service.check_status(cid, pid)
+    assert result["status"] == "expired"
+    assert result["error"] == "import failed"
+
+
+@pytest.mark.asyncio
+async def test_check_status_not_found(credential_service):
+    pid = uuid.uuid4(); cid = uuid.uuid4()
+    with patch.object(credential_service, "_session_factory") as mock_sf:
+        ms = AsyncMock(); ms.__aenter__.return_value = ms
+        ms.get = AsyncMock(return_value=None)
+        mock_sf.return_value = ms
+        with pytest.raises(ValueError):
+            await credential_service.check_status(cid, pid)
