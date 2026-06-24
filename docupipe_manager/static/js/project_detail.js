@@ -27,18 +27,17 @@ async function loadTasks() {
   }
   box.innerHTML =
     `<div style="margin-bottom:10px"><a class="btn btn-sm btn-primary" href="/docupipe/projects/${pid}/tasks/new">新建任务</a></div>` +
-    `<div class="stack">` +
+    `<table class="data-table"><thead><tr><th>名称</th><th>调度</th><th>上次状态</th><th>操作</th></tr></thead><tbody>` +
     tasks.map(t => `
-    <div class="card-row">
-      <div class="card-row-main">
-        <a class="card-row-title" href="/docupipe/projects/${pid}/tasks/${t.id}/edit" style="text-decoration:none">${t.name}</a>
-        <span class="card-row-meta-inline">${t.schedule_cron || "手动"} · ${t.schedule_mode}</span>
-      </div>
-      <div class="card-row-actions">
-        ${t.last_run_status ? `<span class="status-tag ${statusTagClass(t.last_run_status)}">${t.last_run_status}</span>` : ""}
+    <tr>
+      <td>${t.name}</td>
+      <td>${t.schedule_cron || "手动"} · ${t.schedule_mode}</td>
+      <td>${t.last_run_status ? `<span class="status-tag ${statusTagClass(t.last_run_status)}">${t.last_run_status}</span>` : "—"}</td>
+      <td class="action-cell">
+        <a class="btn btn-sm btn-secondary" href="/docupipe/projects/${pid}/tasks/${t.id}/edit">编辑</a>
         <button class="btn btn-sm btn-secondary trigger" data-id="${t.id}">触发</button>
-      </div>
-    </div>`).join("") + `</div>`;
+      </td>
+    </tr>`).join("") + `</tbody></table>`;
   box.querySelectorAll(".trigger").forEach(b => b.addEventListener("click", async () => {
     const r = await fetch(`/api/projects/${pid}/tasks/${b.dataset.id}/trigger`, {method: "POST", headers: {"Content-Type": "application/json"}, body: "{}"});
     if (r.ok) {
