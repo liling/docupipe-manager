@@ -183,7 +183,7 @@ function showCredentialDialog() {
 function startDeviceFlow(area, dialog) {
   let sessionKey = null;
   area.innerHTML = '<p class="card-row-meta">启动设备登录...</p>';
-  fetch(`/api/projects/${pid}/credentials/device-login/start?name=${encodeURIComponent(dialog.querySelector("#cred-name").value || "dws-cred")}`)
+  fetch(`/api/projects/${pid}/credentials/device-login/start?name=${encodeURIComponent(dialog.querySelector("#cred-name").value || "dws-cred")}`, {method: "POST"})
     .then(r => r.ok ? r.json() : Promise.reject())
     .then(data => {
       sessionKey = data.session_key;
