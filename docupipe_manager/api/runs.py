@@ -108,16 +108,16 @@ async def list_runs(
         "page_size": page_size,
         "runs": [
             {
-                "id": str(r.PipelineRun.id),
-                "task_id": str(r.PipelineRun.task_id),
+                "id": str(r.id),
+                "task_id": str(r.task_id),
                 "task_name": r.task_name,
-                "trigger_type": r.PipelineRun.trigger_type.value if hasattr(r.PipelineRun.trigger_type, "value") else r.PipelineRun.trigger_type,
-                "pipeline_name": r.PipelineRun.pipeline_name,
-                "mode": r.PipelineRun.mode,
-                "status": r.PipelineRun.status.value if hasattr(r.PipelineRun.status, "value") else r.PipelineRun.status,
-                "started_at": str(r.PipelineRun.started_at) if r.PipelineRun.started_at else None,
-                "completed_at": str(r.PipelineRun.completed_at) if r.PipelineRun.completed_at else None,
-                "created_at": str(r.PipelineRun.created_at),
+                "trigger_type": r.trigger_type.value if hasattr(r.trigger_type, "value") else r.trigger_type,
+                "pipeline_name": r.pipeline_name,
+                "mode": r.mode,
+                "status": r.status.value if hasattr(r.status, "value") else r.status,
+                "started_at": str(r.started_at) if r.started_at else None,
+                "completed_at": str(r.completed_at) if r.completed_at else None,
+                "created_at": str(r.created_at),
             }
             for r in rows
         ],
