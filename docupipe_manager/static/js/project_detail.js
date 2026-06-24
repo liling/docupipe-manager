@@ -22,13 +22,12 @@ async function loadTasks() {
   const r = await fetch(`${API_PREFIX}/api/projects/${pid}/tasks`);
   const tasks = await r.json();
   const box = document.getElementById("tab-tasks");
+  let html = '<div class="members-header"><h3>任务</h3><a class="btn btn-sm btn-primary" href="/docupipe/projects/${pid}/tasks/new">新建任务</a></div>';
   if (!tasks.length) {
-    box.innerHTML = `<div class="empty-state">无任务。<a href="/docupipe/projects/${pid}/tasks/new">新建任务</a></div>`;
+    box.innerHTML = html + '<div class="empty-state">暂无任务。</div>';
     return;
   }
-  box.innerHTML =
-    `<div style="margin-bottom:10px"><a class="btn btn-sm btn-primary" href="/docupipe/projects/${pid}/tasks/new">新建任务</a></div>` +
-    `<table class="data-table"><thead><tr><th>名称</th><th>Slug</th><th>调度</th><th>上次状态</th><th>操作</th></tr></thead><tbody>` +
+  html += `<table class="data-table"><thead><tr><th>名称</th><th>Slug</th><th>调度</th><th>上次状态</th><th>操作</th></tr></thead><tbody>` +
     tasks.map(t => `
     <tr>
       <td>${t.name} <span class="card-row-meta-inline">${t.schedule_mode}</span></td>
@@ -56,7 +55,7 @@ async function loadCredentials() {
   const creds = await r.json();
   const box = document.getElementById("tab-credentials");
 
-  let html = '<div style="margin-bottom:10px"><button class="btn btn-sm btn-primary" id="cred-add">添加凭证</button></div>';
+  let html = '<div class="members-header"><h3>凭证</h3><button class="btn btn-sm btn-primary" id="cred-add">添加凭证</button></div>';
   html += '<div id="cred-dialog-mount"></div>';
 
   if (!creds.length) {
@@ -425,16 +424,17 @@ async function loadRuns() {
   const box = document.getElementById("tab-runs");
   const pp = _runsPage.page;
   const r = await fetch(`${API_PREFIX}/api/runs?project_id=${pid}&page=${pp}&page_size=20`);
-  if (!r.ok) { box.innerHTML = '<div class="empty-state">加载失败</div>'; return; }
+  const headerHtml = '<div class="members-header"><h3>运行历史</h3></div>';
+  if (!r.ok) { box.innerHTML = headerHtml + '<div class="empty-state">加载失败</div>'; return; }
   const data = await r.json();
 
   if (!data.total) {
-    box.innerHTML = '<div class="empty-state">暂无运行记录。</div>';
+    box.innerHTML = headerHtml + '<div class="empty-state">暂无运行记录。</div>';
     _runsPage = {page: 1};
     return;
   }
 
-  let html = `<p class="text-muted" style="margin:0 0 8px">共 ${data.total} 条记录</p>`;
+  let html = '<div class="members-header"><h3>运行历史</h3><span class="card-row-meta">共 ' + data.total + ' 条记录</span></div>';
   html += '<table class="data-table"><thead><tr><th>任务</th><th>流水线</th><th>模式</th><th>状态</th><th>开始时间</th><th>操作</th></tr></thead><tbody>';
   for (const run of data.runs) {
     html += `<tr>
@@ -463,7 +463,7 @@ async function loadRuns() {
 
 async function loadEnvVars() {
   const box = document.getElementById("tab-env-vars");
-  let html = '<div style="margin-bottom:10px"><button class="btn btn-sm btn-primary" id="env-add">新增变量</button></div>';
+  let html = '<div class="members-header"><h3>环境变量</h3><button class="btn btn-sm btn-primary" id="env-add">新增变量</button></div>';
   html += '<div id="env-list"></div>';
   box.innerHTML = html;
   document.getElementById("env-add").addEventListener("click", () => showEnvEditor(null));
