@@ -22,10 +22,6 @@
   - name: default</textarea>
     </div>
     <div class="form-group">
-      <label>凭证</label>
-      <select name="credential_id" class="form-control"><option value="">（无）</option></select>
-    </div>
-    <div class="form-group">
       <div class="schedule-row">
         <label class="check-row">
           <input type="checkbox" name="schedule_enabled" checked> 调度 cron
@@ -35,7 +31,7 @@
     </div>
     <div class="form-row">
       <div class="form-group">
-        <label>调度模式</label>
+        <label>数据同步模式</label>
         <select name="schedule_mode" class="form-control">
           <option value="incremental">incremental</option>
           <option value="full">full</option>
@@ -46,6 +42,10 @@
         <label>pipeline 名（可选）</label>
         <input name="schedule_pipeline" placeholder="pipeline 名（可选）" class="form-control">
       </div>
+    </div>
+    <div class="form-group">
+      <label>凭证</label>
+      <select name="credential_id" class="form-control"><option value="">（无）</option></select>
     </div>
     <input type="hidden" name="credential_type" value="dws">
     <div class="form-actions">
