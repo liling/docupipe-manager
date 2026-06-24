@@ -161,3 +161,36 @@ async def test_revoke_credential_404(async_client):
             r = await async_client.delete(f"/api/projects/{pid}/credentials/{cid}")
             assert r.status_code == 404
     clear_overrides()
+
+
+@pytest.mark.asyncio
+async def test_rename_credential(async_client):
+    override_get_current_user({"id": str(uuid.uuid4()), "role": "admin"})
+    pid = uuid.uuid4(); cid = uuid.uuid4()
+    with patch("docupipe_manager.api.credentials._require_access_async", new=AsyncMock(return_value={"role": "admin"})):
+        with patch("docupipe_manager.main.app") as mock_app:
+            mock_app.state.credential.rename_credential = AsyncMock()
+            mock_cred = MagicMock(); mock_cred.id = cid; mock_cred.name = "renamed"
+            mock_app.state.credential.rename_credential.return_value = mock_cred
+            r = await async_client.put(
+                f"/api/projects/{pid}/credentials/{cid}",
+                json={"name": "renamed"},
+            )
+            assert r.status_code == 200
+            assert r.json()["name"] == "renamed"
+    clear_overrides()
+
+
+@pytest.mark.asyncio
+async def test_rename_credential_404(async_client):
+    override_get_current_user({"id": str(uuid.uuid4()), "role": "admin"})
+    pid = uuid.uuid4(); cid = uuid.uuid4()
+    with patch("docupipe_manager.api.credentials._require_access_async", new=AsyncMock(return_value={"role": "admin"})):
+        with patch("docupipe_manager.main.app") as mock_app:
+            mock_app.state.credential.rename_credential = AsyncMock(side_effect=ValueError("not found"))
+            r = await async_client.put(
+                f"/api/projects/{pid}/credentials/{cid}",
+                json={"name": "x"},
+            )
+            assert r.status_code == 404
+    clear_overrides()

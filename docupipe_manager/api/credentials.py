@@ -21,6 +21,10 @@ class ImportRequest(BaseModel):
     auth_blob: str = Field(..., min_length=1)
 
 
+class RenameRequest(BaseModel):
+    name: str = Field(..., min_length=1, max_length=255)
+
+
 @router.get("")
 async def list_credentials(project_id: uuid.UUID, user: dict = Depends(_require_access_async)):
     from docupipe_manager.main import app
@@ -94,3 +98,18 @@ async def revoke_credential(project_id: uuid.UUID, credential_id: uuid.UUID,
         return {"status": "revoked"}
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
+
+
+@router.put("/{credential_id}")
+async def rename_credential(project_id: uuid.UUID, credential_id: uuid.UUID,
+                            body: RenameRequest, user: dict = Depends(_require_access_async)):
+    from docupipe_manager.main import app
+    try:
+        cred = await app.state.credential.rename_credential(
+            credential_id, body.name, project_id
+        )
+        return {"id": str(cred.id), "name": cred.name}
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except IntegrityError:
+        raise HTTPException(status_code=409, detail=f"凭证名「{body.name}」已存在")

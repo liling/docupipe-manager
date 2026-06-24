@@ -71,6 +71,7 @@ async function loadCredentials() {
         <td>${fmtExpires(c.token_expires_at)}</td>
         <td class="text-muted">${fmtExpires(c.refresh_token_expires_at)}</td>
         <td class="action-cell">
+          <button class="btn btn-sm btn-secondary edit-cred" data-id="${c.id}" data-name="${c.name}">编辑</button>
           <button class="btn btn-sm btn-secondary test-cred" data-id="${c.id}">测试</button>
           <button class="btn btn-sm btn-danger revoke-cred" data-id="${c.id}">吊销</button>
         </td>
@@ -96,6 +97,7 @@ async function loadCredentials() {
     showTestResult(data);
     loadCredentials();
   }));
+  box.querySelectorAll(".edit-cred").forEach(b => b.addEventListener("click", () => showRenameDialog(b.dataset.id, b.dataset.name)));
 }
 
 function fmtExpires(s) {
@@ -442,6 +444,33 @@ function showTestResult(data) {
   d.showModal();
   d.querySelector("#test-result-close").onclick = () => d.close();
   d.onclick = (e) => { if (e.target === d) d.close(); };
+}
+
+function showRenameDialog(id, oldName) {
+  let d = document.getElementById("rename-dialog");
+  if (!d) { d = document.createElement("dialog"); d.id = "rename-dialog"; document.body.appendChild(d); }
+  d.innerHTML = `
+    <h3 style="margin:0 0 16px">凭证改名</h3>
+    <div class="form-group"><label>新名称</label>
+      <input id="rename-input" class="form-control" value="${oldName}"></div>
+    <div class="form-actions" style="margin-top:16px">
+      <button class="btn btn-sm btn-primary" id="rename-save">保存</button>
+      <button class="btn btn-sm btn-secondary" id="rename-cancel">取消</button>
+    </div>`;
+  d.showModal();
+  d.querySelector("#rename-input").focus();
+  d.querySelector("#rename-cancel").onclick = () => d.close();
+  d.onclick = (e) => { if (e.target === d) d.close(); };
+  d.querySelector("#rename-save").onclick = async () => {
+    const name = d.querySelector("#rename-input").value.trim();
+    if (!name) { alert("名称不能为空"); return; }
+    const r = await fetch(`/api/projects/${pid}/credentials/${id}`, {
+      method: "PUT", headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({name}),
+    });
+    if (r.ok) { d.close(); loadCredentials(); }
+    else { const j = await r.json(); alert(j.detail || "改名失败"); }
+  };
 }
 
 loadProject(); loadTasks(); loadEnvVars(); loadCredentials(); loadMembers(); loadRuns();

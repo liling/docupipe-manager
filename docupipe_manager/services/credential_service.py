@@ -307,6 +307,18 @@ class CredentialService:
             "credential_id": str(credential_id),
         }))
 
+    async def rename_credential(
+        self, credential_id: uuid.UUID, new_name: str, project_id: uuid.UUID
+    ) -> DwsCredential:
+        async with self._session_factory() as db_session:
+            credential = await db_session.get(DwsCredential, credential_id)
+            if credential is None or credential.project_id != project_id:
+                raise ValueError("Credential not found")
+            credential.name = new_name
+            await db_session.commit()
+            await db_session.refresh(credential)
+            return credential
+
     def _cleanup_session(self, session_key: str) -> None:
         session = self._active_sessions.pop(session_key, None)
         if session:

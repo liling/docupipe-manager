@@ -216,3 +216,28 @@ async def test_check_status_not_found(credential_service):
         mock_sf.return_value = ms
         with pytest.raises(ValueError):
             await credential_service.check_status(cid, pid)
+
+
+@pytest.mark.asyncio
+async def test_rename_credential(credential_service):
+    pid = uuid.uuid4(); cid = uuid.uuid4()
+    cred = MagicMock(); cred.id = cid; cred.project_id = pid
+    with patch.object(credential_service, "_session_factory") as mock_sf:
+        ms = AsyncMock(); ms.__aenter__.return_value = ms
+        ms.get = AsyncMock(return_value=cred)
+        ms.commit = AsyncMock(); ms.refresh = AsyncMock()
+        mock_sf.return_value = ms
+        result = await credential_service.rename_credential(cid, "new-name", pid)
+    assert result == cred
+    assert cred.name == "new-name"
+
+
+@pytest.mark.asyncio
+async def test_rename_credential_not_found(credential_service):
+    pid = uuid.uuid4(); cid = uuid.uuid4()
+    with patch.object(credential_service, "_session_factory") as mock_sf:
+        ms = AsyncMock(); ms.__aenter__.return_value = ms
+        ms.get = AsyncMock(return_value=None)
+        mock_sf.return_value = ms
+        with pytest.raises(ValueError):
+            await credential_service.rename_credential(cid, "new-name", pid)
