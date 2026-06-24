@@ -303,7 +303,7 @@ async function loadRuns() {
   html += '</tbody></table>';
 
   const totalPages = Math.ceil(data.total / data.page_size);
-  html += '<div class="form-actions" style="margin-top:8px">';
+  html += '<div class="form-actions" style="margin-top:8px;align-items:center">';
   if (pp > 1) html += `<button class="btn btn-sm btn-secondary" id="runs-prev">上一页</button> `;
   html += `<span class="card-row-meta-inline">第 ${pp}/${totalPages} 页</span>`;
   if (pp < totalPages) html += ` <button class="btn btn-sm btn-secondary" id="runs-next">下一页</button>`;
