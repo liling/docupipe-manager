@@ -187,6 +187,7 @@ class RunnerService:
         log_path = os.path.join(log_dir, f"{run_id}.log")
 
         home_dir = mkdtemp(prefix="dws-home-")
+        os.makedirs(os.path.join(home_dir, "Library", "Keychains"), exist_ok=True)
         try:
             if credential is not None:
                 key_hex = settings.encryption_key
@@ -197,7 +198,7 @@ class RunnerService:
                     f.write(auth_b64)
 
                 import_proc = await asyncio.create_subprocess_exec(
-                    settings.dws_cli_path, "auth", "import", "-i", auth_path, "--base64",
+                    settings.dws_cli_path, "auth", "import", "--base64", "-i", auth_path,
                     stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
                     env={**os.environ, **project_env, "HOME": home_dir},
                 )

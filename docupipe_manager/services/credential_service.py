@@ -46,6 +46,7 @@ class CredentialService:
         """Start dws auth login --device, return verification_url + user_code + session_key."""
         session_key = uuid.uuid4().hex
         home_dir = mkdtemp(prefix="dws-device-")
+        os.makedirs(os.path.join(home_dir, "Library", "Keychains"), exist_ok=True)
 
         proc = await asyncio.create_subprocess_exec(
             self._settings.dws_cli_path, "auth", "login", "--device",
