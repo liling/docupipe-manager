@@ -164,4 +164,17 @@ async def auth_logout(
     return redirect
 
 
+@router.get("/logout")
+async def auth_logout_get(
+    docupipe_session: Optional[str] = Cookie(default=None, alias=SESSION_COOKIE),
+    docupipe_refresh: Optional[str] = Cookie(default=None, alias=REFRESH_COOKIE),
+):
+    """GET handler for SLO iframe — clears cookies without revoke."""
+    from fastapi.responses import PlainTextResponse
+    resp = PlainTextResponse("logged out", status_code=200)
+    resp.delete_cookie(key=SESSION_COOKIE, path="/")
+    resp.delete_cookie(key=REFRESH_COOKIE, path="/")
+    return resp
+
+
 
