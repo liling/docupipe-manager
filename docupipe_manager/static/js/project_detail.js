@@ -91,8 +91,9 @@ async function loadCredentials() {
     const old = btn.textContent; btn.textContent = "测试中..."; btn.disabled = true;
     const tr = await fetch(`/api/projects/${pid}/credentials/${b.dataset.id}/test`, {method: "POST"});
     const data = await tr.json();
-    if (!tr.ok) { alert("测试失败"); btn.textContent = old; btn.disabled = false; return; }
-    if (data.error) { alert("测试失败：" + data.error); btn.textContent = old; btn.disabled = false; return; }
+    if (!tr.ok) { alert("请求失败"); btn.textContent = old; btn.disabled = false; return; }
+    if (data.error) { alert("凭证不可用：" + data.error); }
+    else { alert("凭证可用，状态: " + (data.status || "active")); }
     loadCredentials();
   }));
 }
