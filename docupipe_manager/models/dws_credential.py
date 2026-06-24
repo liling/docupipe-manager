@@ -7,6 +7,7 @@ from sqlalchemy.dialects.postgresql import BYTEA, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from docupipe_manager.models.base import Base
+from docupipe_manager.models.task import CredentialType
 
 _SCHEMA = "docupipe_manager"
 
@@ -36,6 +37,11 @@ class DwsCredential(Base):
     status: Mapped[CredentialStatus] = mapped_column(
         Enum(CredentialStatus, name="credential_status", schema=_SCHEMA, create_constraint=True),
         default=CredentialStatus.active,
+        nullable=False,
+    )
+    credential_type: Mapped[CredentialType] = mapped_column(
+        Enum(CredentialType, name="credential_type", schema=_SCHEMA, create_constraint=True),
+        default=CredentialType.dws,
         nullable=False,
     )
     created_by: Mapped[uuid.UUID] = mapped_column(UUID, nullable=False)
