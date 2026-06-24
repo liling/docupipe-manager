@@ -20,7 +20,7 @@ async def test_list_credentials(async_client):
     with patch("docupipe_manager.api.credentials._require_access_async", new=AsyncMock(return_value={"role": "admin"})):
         with patch("docupipe_manager.main.app") as mock_app:
             mock_app.state.credential.list_credentials = AsyncMock(return_value=[cred])
-            r = await async_client.get(f"/api/projects/{pid}/credentials")
+            r = await async_client.get(f"/docupipe/api/projects/{pid}/credentials")
             assert r.status_code == 200
             data = r.json()
             assert len(data) == 1
@@ -38,7 +38,7 @@ async def test_start_device_login(async_client):
             mock_app.state.credential.start_device_login = AsyncMock(
                 return_value={"session_key": "sk", "verification_url": "url", "user_code": "uc"}
             )
-            r = await async_client.post(f"/api/projects/{pid}/credentials/device-login/start", params={"name": "test-cred"})
+            r = await async_client.post(f"/docupipe/api/projects/{pid}/credentials/device-login/start", params={"name": "test-cred"})
             assert r.status_code == 200
             data = r.json()
             assert data["session_key"] == "sk"
@@ -52,7 +52,7 @@ async def test_poll_device_login(async_client):
     with patch("docupipe_manager.api.credentials._require_access_async", new=AsyncMock(return_value={"role": "admin"})):
         with patch("docupipe_manager.main.app") as mock_app:
             mock_app.state.credential.poll_device_login = AsyncMock(return_value={"status": "pending"})
-            r = await async_client.get(f"/api/projects/{pid}/credentials/device-login/poll", params={"session_key": "sk"})
+            r = await async_client.get(f"/docupipe/api/projects/{pid}/credentials/device-login/poll", params={"session_key": "sk"})
             assert r.status_code == 200
             assert r.json()["status"] == "pending"
     clear_overrides()
@@ -69,7 +69,7 @@ async def test_finalize_device_login(async_client):
             mock_cred.id = cred_id
             mock_app.state.credential.finalize_login = AsyncMock(return_value=mock_cred)
             r = await async_client.post(
-                f"/api/projects/{pid}/credentials/device-login/finalize",
+                f"/docupipe/api/projects/{pid}/credentials/device-login/finalize",
                 json={"session_key": "sk", "name": "my-cred"},
             )
             assert r.status_code == 200
@@ -86,7 +86,7 @@ async def test_import_credential(async_client):
         with patch("docupipe_manager.main.app") as mock_app:
             mock_app.state.credential.create_from_import = AsyncMock(return_value=mock_cred)
             r = await async_client.post(
-                f"/api/projects/{pid}/credentials/import",
+                f"/docupipe/api/projects/{pid}/credentials/import",
                 json={"name": "imp", "auth_blob": "YWJj"},
             )
             assert r.status_code == 200
@@ -102,7 +102,7 @@ async def test_import_credential_invalid(async_client):
         with patch("docupipe_manager.main.app") as mock_app:
             mock_app.state.credential.create_from_import = AsyncMock(side_effect=ValueError("bad blob"))
             r = await async_client.post(
-                f"/api/projects/{pid}/credentials/import",
+                f"/docupipe/api/projects/{pid}/credentials/import",
                 json={"name": "imp", "auth_blob": "x"},
             )
             assert r.status_code == 400
@@ -118,7 +118,7 @@ async def test_test_endpoint(async_client):
             mock_app.state.credential.check_status = AsyncMock(
                 return_value={"status": "active", "corp_id": "c", "error": None}
             )
-            r = await async_client.post(f"/api/projects/{pid}/credentials/{cid}/test")
+            r = await async_client.post(f"/docupipe/api/projects/{pid}/credentials/{cid}/test")
             assert r.status_code == 200
             assert r.json()["status"] == "active"
     clear_overrides()
@@ -131,7 +131,7 @@ async def test_test_endpoint_404(async_client):
     with patch("docupipe_manager.api.credentials._require_access_async", new=AsyncMock(return_value={"role": "admin"})):
         with patch("docupipe_manager.main.app") as mock_app:
             mock_app.state.credential.check_status = AsyncMock(side_effect=ValueError("not found"))
-            r = await async_client.post(f"/api/projects/{pid}/credentials/{cid}/test")
+            r = await async_client.post(f"/docupipe/api/projects/{pid}/credentials/{cid}/test")
             assert r.status_code == 404
     clear_overrides()
 
@@ -144,7 +144,7 @@ async def test_revoke_credential(async_client):
     with patch("docupipe_manager.api.credentials._require_access_async", new=AsyncMock(return_value={"role": "admin"})):
         with patch("docupipe_manager.main.app") as mock_app:
             mock_app.state.credential.revoke = AsyncMock(return_value=None)
-            r = await async_client.delete(f"/api/projects/{pid}/credentials/{cid}")
+            r = await async_client.delete(f"/docupipe/api/projects/{pid}/credentials/{cid}")
             assert r.status_code == 200
             assert r.json()["status"] == "revoked"
     clear_overrides()
@@ -158,7 +158,7 @@ async def test_revoke_credential_404(async_client):
     with patch("docupipe_manager.api.credentials._require_access_async", new=AsyncMock(return_value={"role": "admin"})):
         with patch("docupipe_manager.main.app") as mock_app:
             mock_app.state.credential.revoke = AsyncMock(side_effect=ValueError("not found"))
-            r = await async_client.delete(f"/api/projects/{pid}/credentials/{cid}")
+            r = await async_client.delete(f"/docupipe/api/projects/{pid}/credentials/{cid}")
             assert r.status_code == 404
     clear_overrides()
 
@@ -173,7 +173,7 @@ async def test_rename_credential(async_client):
             mock_cred = MagicMock(); mock_cred.id = cid; mock_cred.name = "renamed"
             mock_app.state.credential.rename_credential.return_value = mock_cred
             r = await async_client.put(
-                f"/api/projects/{pid}/credentials/{cid}",
+                f"/docupipe/api/projects/{pid}/credentials/{cid}",
                 json={"name": "renamed"},
             )
             assert r.status_code == 200
@@ -189,7 +189,7 @@ async def test_rename_credential_404(async_client):
         with patch("docupipe_manager.main.app") as mock_app:
             mock_app.state.credential.rename_credential = AsyncMock(side_effect=ValueError("not found"))
             r = await async_client.put(
-                f"/api/projects/{pid}/credentials/{cid}",
+                f"/docupipe/api/projects/{pid}/credentials/{cid}",
                 json={"name": "x"},
             )
             assert r.status_code == 404

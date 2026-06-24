@@ -112,9 +112,11 @@ async def limit_request_body_size(request: Request, call_next):
 
 @app.exception_handler(HTTPException)
 async def page_auth_redirect(request: Request, exc: HTTPException):
-    if exc.status_code == 401 and not request.url.path.startswith(("/api/", "/auth/")):
+    if exc.status_code == 401 and request.url.path.startswith("/docupipe/") and not request.url.path.startswith(
+        ("/docupipe/api/", "/docupipe/admin/api/")
+    ):
         return RedirectResponse(
-            url=f"/auth/login-redirect?return_to={quote(request.url.path)}",
+            url=f"/docupipe/auth/login-redirect?return_to={quote(request.url.path)}",
             status_code=302,
         )
     return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
@@ -141,9 +143,10 @@ install_ui(
     platform_url=settings.platform_url,
     manager_url="",
     docupipe_url=settings.base_url,
+    service_prefix="/docupipe",
 )
 
-app.mount("/static", StaticFiles(directory="docupipe_manager/static"), name="static")
+app.mount("/docupipe/static", StaticFiles(directory="docupipe_manager/static"), name="static")
 
 from docupipe_manager.api.auth import router as auth_router
 from docupipe_manager.api.pages import router as pages_router
@@ -155,17 +158,17 @@ from docupipe_manager.api.stats import router as stats_router
 from docupipe_manager.api.tasks import router as tasks_router
 from docupipe_manager.api.env_vars import router as env_vars_router
 
-app.include_router(auth_router)
+app.include_router(auth_router, prefix="/docupipe")
 app.include_router(pages_router)
-app.include_router(projects_router)
-app.include_router(projects_admin_router)
-app.include_router(credentials_router)
-app.include_router(runs_router)
-app.include_router(members_router)
-app.include_router(users_router)
-app.include_router(stats_router)
-app.include_router(tasks_router)
-app.include_router(env_vars_router)
+app.include_router(projects_router, prefix="/docupipe")
+app.include_router(projects_admin_router, prefix="/docupipe")
+app.include_router(credentials_router, prefix="/docupipe")
+app.include_router(runs_router, prefix="/docupipe")
+app.include_router(members_router, prefix="/docupipe")
+app.include_router(users_router, prefix="/docupipe")
+app.include_router(stats_router, prefix="/docupipe")
+app.include_router(tasks_router, prefix="/docupipe")
+app.include_router(env_vars_router, prefix="/docupipe")
 
 
 @app.get("/")
@@ -174,6 +177,6 @@ async def root():
     return RedirectResponse(url="/docupipe/projects", status_code=302)
 
 
-@app.get("/health")
+@app.get("/docupipe/health")
 async def health():
     return {"status": "ok"}

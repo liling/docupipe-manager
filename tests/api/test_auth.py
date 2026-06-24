@@ -47,7 +47,7 @@ async def test_require_admin_rejects_non_admin():
 
 @pytest.mark.asyncio
 async def test_auth_login_redirect(async_client):
-    resp = await async_client.get("/auth/login-redirect", follow_redirects=False)
+    resp = await async_client.get("/docupipe/auth/login-redirect", follow_redirects=False)
     assert resp.status_code == 302
     location = resp.headers.get("location", "")
     assert "/oauth/authorize" in location
@@ -57,7 +57,7 @@ async def test_auth_login_redirect(async_client):
 
 @pytest.mark.asyncio
 async def test_auth_login_redirect_sets_state_cookie(async_client):
-    resp = await async_client.get("/auth/login-redirect", follow_redirects=False)
+    resp = await async_client.get("/docupipe/auth/login-redirect", follow_redirects=False)
     assert resp.status_code == 302
     cookies = resp.cookies
     assert "docupipe_oauth_state" in cookies
@@ -67,7 +67,7 @@ async def test_auth_login_redirect_sets_state_cookie(async_client):
 @pytest.mark.asyncio
 async def test_auth_login_redirect_custom_return_to(async_client):
     resp = await async_client.get(
-        "/auth/login-redirect?return_to=/docupipe/projects/123",
+        "/docupipe/auth/login-redirect?return_to=/docupipe/projects/123",
         follow_redirects=False,
     )
     assert resp.status_code == 302
@@ -76,7 +76,7 @@ async def test_auth_login_redirect_custom_return_to(async_client):
 
 @pytest.mark.asyncio
 async def test_callback_missing_code(async_client):
-    resp = await async_client.get("/auth/callback?state=abc")
+    resp = await async_client.get("/docupipe/auth/callback?state=abc")
     assert resp.status_code == 400
     assert resp.json()["detail"] == "Missing authorization code"
 
@@ -84,7 +84,7 @@ async def test_callback_missing_code(async_client):
 @pytest.mark.asyncio
 async def test_callback_invalid_state(async_client):
     resp = await async_client.get(
-        "/auth/callback?code=abc&state=wrong",
+        "/docupipe/auth/callback?code=abc&state=wrong",
         cookies={"docupipe_oauth_state": "different"},
     )
     assert resp.status_code == 400
@@ -94,7 +94,7 @@ async def test_callback_invalid_state(async_client):
 @pytest.mark.asyncio
 async def test_logout_clears_cookies(async_client):
     resp = await async_client.post(
-        "/auth/logout",
+        "/docupipe/auth/logout",
         cookies={
             "docupipe_session": "test-session",
             "docupipe_refresh": "test-refresh",
@@ -110,6 +110,6 @@ async def test_logout_clears_cookies(async_client):
 
 @pytest.mark.asyncio
 async def test_health(async_client):
-    resp = await async_client.get("/health")
+    resp = await async_client.get("/docupipe/health")
     assert resp.status_code == 200
     assert resp.json() == {"status": "ok"}

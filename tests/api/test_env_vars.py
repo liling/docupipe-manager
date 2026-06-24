@@ -45,7 +45,7 @@ async def test_list_masks_secret_value(async_client):
             _row(key="BAR", value="enc", is_secret=True)]
     with patch("docupipe_manager.api.env_vars._require_access_async", new=AsyncMock(return_value={"role": "admin"})):
         with patch("docupipe_manager.api.env_vars._get_engine", return_value=_mock_engine(rows=rows)):
-            r = await async_client.get(f"/api/projects/{pid}/env-vars")
+            r = await async_client.get(f"/docupipe/api/projects/{pid}/env-vars")
             assert r.status_code == 200
             data = r.json()
             assert data[0]["value"] == "plain"
@@ -60,7 +60,7 @@ async def test_create_plain_var(async_client):
     pid = uuid.uuid4()
     with patch("docupipe_manager.api.env_vars._require_access_async", new=AsyncMock(return_value={"role": "admin"})):
         with patch("docupipe_manager.api.env_vars._get_engine", return_value=_mock_engine(fetchone_row=None)):
-            r = await async_client.post(f"/api/projects/{pid}/env-vars",
+            r = await async_client.post(f"/docupipe/api/projects/{pid}/env-vars",
                                         json={"key": "FOO", "value": "bar"})
             assert r.status_code == 200
             assert "id" in r.json()
@@ -72,7 +72,7 @@ async def test_create_invalid_key(async_client):
     override_get_current_user({"id": str(uuid.uuid4()), "role": "admin"})
     pid = uuid.uuid4()
     with patch("docupipe_manager.api.env_vars._require_access_async", new=AsyncMock(return_value={"role": "admin"})):
-        r = await async_client.post(f"/api/projects/{pid}/env-vars",
+        r = await async_client.post(f"/docupipe/api/projects/{pid}/env-vars",
                                     json={"key": "1-bad", "value": "x"})
         assert r.status_code == 422
     clear_overrides()
@@ -85,7 +85,7 @@ async def test_create_duplicate_key_conflict(async_client):
     existing = _row(key="FOO")
     with patch("docupipe_manager.api.env_vars._require_access_async", new=AsyncMock(return_value={"role": "admin"})):
         with patch("docupipe_manager.api.env_vars._get_engine", return_value=_mock_engine(fetchone_row=existing)):
-            r = await async_client.post(f"/api/projects/{pid}/env-vars",
+            r = await async_client.post(f"/docupipe/api/projects/{pid}/env-vars",
                                         json={"key": "FOO", "value": "x"})
             assert r.status_code == 409
     clear_overrides()
@@ -99,7 +99,7 @@ async def test_update_secret_without_value_field_keeps_original(async_client):
     current = _row(id=var_id, key="BAR", value="ciphertext", is_secret=True)
     with patch("docupipe_manager.api.env_vars._require_access_async", new=AsyncMock(return_value={"role": "admin"})):
         with patch("docupipe_manager.api.env_vars._get_engine", return_value=_mock_engine(fetchone_row=current)):
-            r = await async_client.put(f"/api/projects/{pid}/env-vars/{var_id}",
+            r = await async_client.put(f"/docupipe/api/projects/{pid}/env-vars/{var_id}",
                                        json={"description": "new desc"})
             assert r.status_code == 200
     clear_overrides()
@@ -113,7 +113,7 @@ async def test_update_secret_with_empty_value_keeps_original(async_client):
     current = _row(id=var_id, key="BAR", value="ciphertext", is_secret=True)
     with patch("docupipe_manager.api.env_vars._require_access_async", new=AsyncMock(return_value={"role": "admin"})):
         with patch("docupipe_manager.api.env_vars._get_engine", return_value=_mock_engine(fetchone_row=current)):
-            r = await async_client.put(f"/api/projects/{pid}/env-vars/{var_id}",
+            r = await async_client.put(f"/docupipe/api/projects/{pid}/env-vars/{var_id}",
                                        json={"value": ""})
             assert r.status_code == 200
     clear_overrides()
@@ -127,7 +127,7 @@ async def test_update_nonsecret_with_null_value_keeps_original(async_client):
     current = _row(id=var_id, key="FOO", value="plain", is_secret=False)
     with patch("docupipe_manager.api.env_vars._require_access_async", new=AsyncMock(return_value={"role": "admin"})):
         with patch("docupipe_manager.api.env_vars._get_engine", return_value=_mock_engine(fetchone_row=current)):
-            r = await async_client.put(f"/api/projects/{pid}/env-vars/{var_id}",
+            r = await async_client.put(f"/docupipe/api/projects/{pid}/env-vars/{var_id}",
                                        json={"value": None})
             assert r.status_code == 200
     clear_overrides()
@@ -141,6 +141,6 @@ async def test_delete_var(async_client):
     existing = _row(id=var_id)
     with patch("docupipe_manager.api.env_vars._require_access_async", new=AsyncMock(return_value={"role": "admin"})):
         with patch("docupipe_manager.api.env_vars._get_engine", return_value=_mock_engine(fetchone_row=existing)):
-            r = await async_client.delete(f"/api/projects/{pid}/env-vars/{var_id}")
+            r = await async_client.delete(f"/docupipe/api/projects/{pid}/env-vars/{var_id}")
             assert r.status_code == 200
     clear_overrides()

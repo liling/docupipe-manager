@@ -21,7 +21,7 @@ async def test_list_runs_admin(async_client):
         mock_engine.begin.return_value.__aenter__ = AsyncMock(return_value=mock_conn)
         mock_engine.begin.return_value.__aexit__ = AsyncMock(return_value=None)
         mock_app.state.engine = mock_engine
-        r = await async_client.get("/api/runs")
+        r = await async_client.get("/docupipe/api/runs")
         assert r.status_code == 200
         assert r.json()["total"] == 0
     clear_overrides()
@@ -41,7 +41,7 @@ async def test_list_runs_non_admin_empty(async_client):
         mock_engine.begin.return_value.__aexit__ = AsyncMock(return_value=None)
         mock_app.state.engine = mock_engine
 
-        r = await async_client.get("/api/runs")
+        r = await async_client.get("/docupipe/api/runs")
         assert r.status_code == 200
         data = r.json()
         assert data["total"] == 0
@@ -60,7 +60,7 @@ async def test_get_run_not_found(async_client):
         mock_engine.begin.return_value.__aexit__ = AsyncMock(return_value=None)
         mock_app.state.engine = mock_engine
 
-        r = await async_client.get(f"/api/runs/{uuid.uuid4()}")
+        r = await async_client.get(f"/docupipe/api/runs/{uuid.uuid4()}")
         assert r.status_code == 404
     clear_overrides()
 
@@ -83,7 +83,7 @@ async def test_cancel_run(async_client):
         mock_app.state.runner = AsyncMock()
         mock_app.state.runner.cancel_run = AsyncMock(return_value=None)
 
-        r = await async_client.post(f"/api/runs/{run_id}/cancel")
+        r = await async_client.post(f"/docupipe/api/runs/{run_id}/cancel")
         assert r.status_code == 200
         assert r.json()["status"] == "cancelled"
     clear_overrides()
@@ -125,7 +125,7 @@ async def test_get_run_includes_command_and_task_name(async_client):
         mock_engine.begin.return_value.__aexit__ = AsyncMock(return_value=None)
         mock_app.state.engine = mock_engine
 
-        r = await async_client.get(f"/api/runs/{rid}")
+        r = await async_client.get(f"/docupipe/api/runs/{rid}")
         assert r.status_code == 200
         data = r.json()
         assert data["command_text"] == "python -m docupipe run"
@@ -177,7 +177,7 @@ async def test_stream_completed_run_reads_file(async_client, tmp_path):
         runner.is_active = MagicMock(return_value=False)
         mock_app.state.runner = runner
 
-        r = await async_client.get(f"/api/runs/{rid}/stream")
+        r = await async_client.get(f"/docupipe/api/runs/{rid}/stream")
         assert r.status_code == 200
         text = r.text
         assert "event: meta" in text
@@ -233,7 +233,7 @@ async def test_stream_active_run_replays_history_then_live_then_end(async_client
         runner.unsubscribe = MagicMock()
         mock_app.state.runner = runner
 
-        r = await async_client.get(f"/api/runs/{rid}/stream")
+        r = await async_client.get(f"/docupipe/api/runs/{rid}/stream")
         assert r.status_code == 200
         text = r.text
         assert "event: meta" in text
