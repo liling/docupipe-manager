@@ -11,6 +11,9 @@ const tid = root.dataset.taskId;
     o.value = c.id; o.textContent = `${c.name} (${c.corp_id})`;
     sel.appendChild(o);
   });
+  const cronInput = document.querySelector('[name="schedule_cron"]');
+  const enabledCheck = document.querySelector('[name="schedule_enabled"]');
+
   if (tid) {
     const r = await fetch(`/api/projects/${pid}/tasks/${tid}`);
     const t = await r.json();
@@ -23,6 +26,11 @@ const tid = root.dataset.taskId;
     if (t.credential_id) sel.value = t.credential_id;
     f.elements.slug.readOnly = true;
   }
+
+  cronInput.disabled = !enabledCheck.checked;
+  enabledCheck.addEventListener("change", () => {
+    cronInput.disabled = !enabledCheck.checked;
+  });
 })();
 
 document.getElementById("task-form").addEventListener("submit", async (e) => {
@@ -30,6 +38,7 @@ document.getElementById("task-form").addEventListener("submit", async (e) => {
   const f = e.target;
   const body = Object.fromEntries(new FormData(f).entries());
   body.schedule_enabled = f.elements.schedule_enabled.checked;
+  body.schedule_cron = f.elements.schedule_cron.value;
   if (!body.credential_id) { delete body.credential_id; delete body.credential_type; }
   const url = tid ? `/api/projects/${pid}/tasks/${tid}` : `/api/projects/${pid}/tasks`;
   const method = tid ? "PUT" : "POST";

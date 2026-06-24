@@ -25,11 +25,15 @@
       <label>凭证</label>
       <select name="credential_id" class="form-control"><option value="">（无）</option></select>
     </div>
-    <div class="form-row">
-      <div class="form-group">
-        <label>调度 cron</label>
-        <input name="schedule_cron" placeholder="如 0 3 * * *" class="form-control">
+    <div class="form-group">
+      <div class="schedule-row">
+        <label class="check-row">
+          <input type="checkbox" name="schedule_enabled" checked> 调度 cron
+        </label>
+        <input name="schedule_cron" placeholder="如 0 3 * * *" class="form-control" disabled>
       </div>
+    </div>
+    <div class="form-row">
       <div class="form-group">
         <label>调度模式</label>
         <select name="schedule_mode" class="form-control">
@@ -38,13 +42,10 @@
           <option value="mirror">mirror</option>
         </select>
       </div>
-    </div>
-    <div class="form-group">
-      <label>pipeline 名（可选）</label>
-      <input name="schedule_pipeline" placeholder="pipeline 名（可选）" class="form-control">
-    </div>
-    <div class="form-group">
-      <label class="check-row"><input type="checkbox" name="schedule_enabled" checked> 启用调度</label>
+      <div class="form-group">
+        <label>pipeline 名（可选）</label>
+        <input name="schedule_pipeline" placeholder="pipeline 名（可选）" class="form-control">
+      </div>
     </div>
     <input type="hidden" name="credential_type" value="dws">
     <div class="form-actions">

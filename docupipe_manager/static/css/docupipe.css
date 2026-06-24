@@ -126,8 +126,29 @@ textarea.form-control { resize: vertical; line-height: 1.5; }
 .form-actions { display: flex; gap: 10px; margin-top: 8px; }
 
 /* ── 复选框行 ── */
-.check-row { display: flex; align-items: center; gap: 8px; font-size: 14px; color: var(--text); }
-.check-row input { width: auto; }
+.check-row { display: flex; align-items: center; gap: 8px; font-size: 14px; color: var(--text); cursor: pointer; }
+.check-row input[type="checkbox"] {
+  margin: 0; padding: 0; width: 13px; height: 13px; flex: none;
+  appearance: none; -webkit-appearance: none;
+  border: 1px solid #8b8fa3; border-radius: 2px;
+  background: #fff; cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  transition: background .15s, border-color .15s;
+}
+.check-row input[type="checkbox"]:checked {
+  background: var(--primary, #4f46e5); border-color: var(--primary, #4f46e5);
+}
+.check-row input[type="checkbox"]:checked::after {
+  content: ""; display: block;
+  width: 4px; height: 7px;
+  border: solid #fff; border-width: 0 1.5px 1.5px 0;
+  transform: rotate(45deg) translateY(-.5px);
+}
+
+/* ── 调度 cron 行（checkbox + input 同一行） ── */
+.schedule-row { display: flex; align-items: center; gap: 10px; }
+.schedule-row .check-row { display: flex; align-items: center; gap: 8px; white-space: nowrap; flex-shrink: 0; margin-bottom: 0; }
+.schedule-row .form-control { flex: 1; min-width: 0; width: auto; }
 
 /* ── 内联 code ── */
 code {
