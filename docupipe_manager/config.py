@@ -17,10 +17,10 @@ class Settings(BaseSettings):
     jwt_secret: str
     encryption_key: str = ""
 
-    platform_url: str = "http://xinyi-platform:8000"
+    platform_url: str = "http://xinyi-platform:8000/xinyi"
     oauth_client_id: str = "docupipe-prod"
     oauth_client_secret: str = ""
-    oauth_redirect_uri: str = "http://localhost:8002/auth/callback"
+    oauth_redirect_uri: str = "http://localhost:8002/docupipe/auth/callback"
 
     refresh_token_ttl_days: int = 7
     access_token_ttl_seconds: int = 900
@@ -30,7 +30,6 @@ class Settings(BaseSettings):
     host: str = "0.0.0.0"
     port: int = 8002
     base_url: str = "http://localhost:8002"
-    dev_mode: bool = False
 
     model_config = {"env_prefix": "DOCUPIPE_MANAGER_", "env_file": ".env", "extra": "ignore"}
 

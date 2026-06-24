@@ -31,11 +31,8 @@ async def _verify_run_access(run_id: uuid.UUID, user: dict):
             row = await conn.execute(text("""
                 SELECT 1 FROM docupipe_manager.tasks t
                 JOIN docupipe_manager.projects p ON p.id = t.project_id
-                WHERE t.id = :tid AND (
-                    p.owner_id = :uid
-                    OR p.id IN (
-                        SELECT pm.project_id FROM docupipe_manager.project_members pm WHERE pm.user_id = :uid
-                    )
+                WHERE t.id = :tid AND p.id IN (
+                    SELECT pm.project_id FROM docupipe_manager.project_members pm WHERE pm.user_id = :uid
                 )
             """), {"tid": str(run.task_id), "uid": user["id"]})
             if not row.fetchone():
@@ -47,6 +44,7 @@ async def _verify_run_access(run_id: uuid.UUID, user: dict):
 @router.get("")
 async def list_runs(
     task_id: Optional[uuid.UUID] = None,
+    project_id: Optional[uuid.UUID] = None,
     status: Optional[str] = None,
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
@@ -54,12 +52,19 @@ async def list_runs(
 ):
     from sqlalchemy import func, select, text
     from docupipe_manager.models.pipeline_run import PipelineRun
+    from docupipe_manager.models.task import Task
 
     engine = _get_engine()
 
     conditions = []
     if task_id:
         conditions.append(PipelineRun.task_id == task_id)
+    if project_id:
+        conditions.append(
+            PipelineRun.task_id.in_(
+                select(Task.id).where(Task.project_id == project_id)
+            )
+        )
     if status:
         conditions.append(PipelineRun.status == status)
 
@@ -71,9 +76,9 @@ async def list_runs(
                 r[0] for r in (await conn.execute(text("""
                     SELECT t.id FROM docupipe_manager.tasks t
                     WHERE t.project_id IN (
-                        SELECT id FROM docupipe_manager.projects WHERE owner_id = :uid AND status != 'archived'
-                        UNION
-                        SELECT pm.project_id FROM docupipe_manager.project_members pm WHERE pm.user_id = :uid
+                        SELECT pm.project_id FROM docupipe_manager.project_members pm
+                        JOIN docupipe_manager.projects p ON p.id = pm.project_id
+                        WHERE pm.user_id = :uid AND p.status != 'archived'
                     )
                 """), {"uid": user["id"]})).fetchall()
             ]
@@ -86,7 +91,9 @@ async def list_runs(
             count_q = count_q.where(*conditions)
         total = (await conn.execute(count_q)).scalar() or 0
 
-        q = select(PipelineRun).order_by(PipelineRun.created_at.desc())
+        q = select(PipelineRun, Task.name.label("task_name")).join(
+            Task, PipelineRun.task_id == Task.id, isouter=not bool(project_id)
+        ).order_by(PipelineRun.created_at.desc())
         if conditions:
             q = q.where(*conditions)
         q = q.offset(offset).limit(page_size)
@@ -100,6 +107,7 @@ async def list_runs(
             {
                 "id": str(r.id),
                 "task_id": str(r.task_id),
+                "task_name": r.task_name,
                 "trigger_type": r.trigger_type.value if hasattr(r.trigger_type, "value") else r.trigger_type,
                 "pipeline_name": r.pipeline_name,
                 "mode": r.mode,
@@ -210,11 +218,14 @@ async def stream_run(run_id: uuid.UUID, user: dict = Depends(get_current_user)):
         log_path = meta.get("log_path")
         yield _sse("meta", meta)
 
+        had_logs = False
         if runner.is_active(run_id):
             history, queue = runner.subscribe(run_id)
             try:
-                for line in history:
-                    yield _sse("log", line)
+                if history:
+                    had_logs = True
+                    for line in history:
+                        yield _sse("log", line)
                 while True:
                     try:
                         line = await asyncio.wait_for(queue.get(), timeout=15)
@@ -223,10 +234,13 @@ async def stream_run(run_id: uuid.UUID, user: dict = Depends(get_current_user)):
                         continue
                     if line is None:  # sentinel
                         break
+                    had_logs = True
                     yield _sse("log", line)
             finally:
                 runner.unsubscribe(run_id, queue)
-        elif log_path:
+
+        # 竞态回退：缓冲已被 _close_subscribers 销毁时，从文件读取
+        if log_path and not had_logs:
             try:
                 with open(log_path) as f:
                     for line in f:
@@ -238,6 +252,9 @@ async def stream_run(run_id: uuid.UUID, user: dict = Depends(get_current_user)):
         yield _sse("end", {
             "status": final.get("status"),
             "exit_code": final.get("exit_code"),
+            "command_text": final.get("command_text"),
+            "started_at": final.get("started_at"),
+            "completed_at": final.get("completed_at"),
         })
 
     return StreamingResponse(event_stream(), media_type="text/event-stream")

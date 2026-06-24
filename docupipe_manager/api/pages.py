@@ -88,4 +88,5 @@ def _ui_vars(request: Request) -> dict:
         "manager_url": ui.get("manager_url", ""),
         "docupipe_url": ui.get("docupipe_url", ""),
         "products": ui.get("products", []),
+        "service_prefix": ui.get("service_prefix", ""),
     }

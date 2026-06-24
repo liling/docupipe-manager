@@ -3,7 +3,7 @@ const pid = root.dataset.projectId;
 const tid = root.dataset.taskId;
 
 (async function init() {
-  const cr = await fetch(`/api/projects/${pid}/credentials`);
+  const cr = await fetch(`${API_PREFIX}/api/projects/${pid}/credentials`);
   const creds = await cr.json();
   const sel = document.querySelector('[name="credential_id"]');
   creds.forEach(c => {
@@ -15,7 +15,7 @@ const tid = root.dataset.taskId;
   const enabledCheck = document.querySelector('[name="schedule_enabled"]');
 
   if (tid) {
-    const r = await fetch(`/api/projects/${pid}/tasks/${tid}`);
+    const r = await fetch(`${API_PREFIX}/api/projects/${pid}/tasks/${tid}`);
     const t = await r.json();
     const f = document.getElementById("task-form");
     Object.entries(t).forEach(([k, v]) => {
@@ -38,9 +38,9 @@ document.getElementById("task-form").addEventListener("submit", async (e) => {
   const f = e.target;
   const body = Object.fromEntries(new FormData(f).entries());
   body.schedule_enabled = f.elements.schedule_enabled.checked;
-  body.schedule_cron = f.elements.schedule_cron.value;
+  body.schedule_cron = body.schedule_enabled ? f.elements.schedule_cron.value : null;
   if (!body.credential_id) { delete body.credential_id; delete body.credential_type; }
-  const url = tid ? `/api/projects/${pid}/tasks/${tid}` : `/api/projects/${pid}/tasks`;
+  const url = tid ? `${API_PREFIX}/api/projects/${pid}/tasks/${tid}` : `${API_PREFIX}/api/projects/${pid}/tasks`;
   const method = tid ? "PUT" : "POST";
   const r = await fetch(url, {method, headers: {"Content-Type": "application/json"}, body: JSON.stringify(body)});
   if (r.ok) location.href = `/docupipe/projects/${pid}`;

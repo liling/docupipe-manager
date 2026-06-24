@@ -10,7 +10,7 @@ from tests.conftest import override_get_current_user, clear_overrides
 @pytest.mark.asyncio
 async def test_create_project_requires_admin(async_client):
     override_get_current_user({"id": str(uuid.uuid4()), "username": "u", "role": "user"})
-    r = await async_client.post("/admin/api/projects", json={"name": "p", "slug": "p"})
+    r = await async_client.post("/docupipe/admin/api/projects", json={"name": "p", "slug": "p"})
     assert r.status_code == 403
     clear_overrides()
 
@@ -36,7 +36,7 @@ async def test_create_project_admin_ok(async_client):
         mock_engine.begin.return_value.__aexit__ = AsyncMock(return_value=None)
         mock_ge.return_value = mock_engine
 
-        r = await async_client.post("/admin/api/projects", json={"name": "p", "slug": "p"})
+        r = await async_client.post("/docupipe/admin/api/projects", json={"name": "p", "slug": "p"})
         assert r.status_code == 200
         assert "id" in r.json()
     clear_overrides()

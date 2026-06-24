@@ -215,7 +215,7 @@ async def test_do_execute_flushes_and_broadcasts_each_line(runner_service, tmp_p
         proc2.stdout.readline = AsyncMock(side_effect=[b"line A\n", b"line B\n", b""])
         proc2.wait = AsyncMock(return_value=0)
         proc2.pid = 12345
-        mock_sub.side_effect = [proc1, proc2]
+        mock_sub.side_effect = [proc1, proc1, proc2]
 
         _, queue = runner_service.subscribe(rid)
         await runner_service._do_execute(rid)
@@ -290,7 +290,7 @@ async def test_do_execute_truncates_log_file_at_max_bytes(runner_service, tmp_pa
         proc2.stdout.readline = AsyncMock(side_effect=lines + [b""])
         proc2.wait = AsyncMock(return_value=0)
         proc2.pid = 12345
-        mock_sub.side_effect = [proc1, proc2]
+        mock_sub.side_effect = [proc1, proc1, proc2]
 
         _, queue = runner_service.subscribe(rid)
         await runner_service._do_execute(rid)
@@ -433,10 +433,7 @@ async def test_do_execute_injects_project_env_into_subprocess(runner_service, tm
     runner_service._session_factory = fake_factory
     runner_service._settings.data_dir = str(tmp_path)
 
-    home_dir = tmp_path / "home"
-
-    with patch("docupipe_manager.services.runner_service.mkdtemp", return_value=str(home_dir)), \
-         patch("asyncio.create_subprocess_exec", new=AsyncMock()) as mock_sub:
+    with patch("asyncio.create_subprocess_exec", new=AsyncMock()) as mock_sub:
         proc = MagicMock()
         proc.stdout.readline = AsyncMock(side_effect=[b"ok\n", b""])
         proc.wait = AsyncMock(return_value=0)
@@ -449,4 +446,5 @@ async def test_do_execute_injects_project_env_into_subprocess(runner_service, tm
     env_passed = mock_sub.call_args.kwargs["env"]
     assert env_passed["MY_PLAIN"] == "hello"
     assert env_passed["MY_SECRET"] == "topsecret"
-    assert env_passed["HOME"] == str(home_dir)
+    # HOME 不再被覆写，保留真实用户目录
+    assert "HOME" in env_passed

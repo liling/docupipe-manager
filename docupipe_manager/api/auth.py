@@ -1,11 +1,10 @@
 import logging
-from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 from fastapi import APIRouter, Cookie, Depends, HTTPException, Request, Response
 from fastapi.responses import RedirectResponse
 
-from docupipe_manager.auth.dependencies import SESSION_COOKIE, get_current_user_or_none
+from docupipe_manager.auth.dependencies import SESSION_COOKIE
 from docupipe_manager.auth.oauth_state import generate_state, verify_state
 from docupipe_manager.config import Settings
 
@@ -156,47 +155,26 @@ async def auth_logout(
     client = app.state.platform_client
 
     if docupipe_refresh:
-        await client.revoke_token(docupipe_refresh)
+        await client.revoke_user_session(docupipe_refresh)
 
-    response.delete_cookie(key=SESSION_COOKIE)
-    response.delete_cookie(key=REFRESH_COOKIE)
-
-    return {"status": "ok"}
-
-
-# ── Development helper (not for production) ──────────────────────────────
-
-
-@router.get("/dev-login")
-async def dev_login(
-    request: Request,
-    username: str = "admin",
-    role: str = "admin",
-    settings: Settings = Depends(_get_settings),
-):
-    """Set a fake session cookie for local development (no xinyi-platform required)."""
-    from jose import jwt as jose_jwt
-    from datetime import datetime, timedelta, timezone
-
-    payload = {
-        "sub": "00000000-0000-0000-0000-000000000001",
-        "username": username,
-        "role": role,
-        "type": "access",
-        "aud": "docupipe-prod",
-        "iss": "xinyi-platform",
-        "exp": datetime.now(timezone.utc) + timedelta(hours=24),
-    }
-    token = jose_jwt.encode(payload, settings.jwt_secret, algorithm="HS256")
-
-    redirect = RedirectResponse(url="/docupipe/projects", status_code=302)
-    secure = settings.base_url.startswith("https")
-    redirect.set_cookie(
-        key=SESSION_COOKIE,
-        value=token,
-        max_age=86400,
-        httponly=True,
-        secure=secure,
-        samesite="lax",
-    )
+    platform_logout_url = f"{settings.platform_url}/logout?return_to={settings.base_url}"
+    redirect = RedirectResponse(url=platform_logout_url, status_code=303)
+    redirect.delete_cookie(key=SESSION_COOKIE, path="/")
+    redirect.delete_cookie(key=REFRESH_COOKIE, path="/")
     return redirect
+
+
+@router.get("/logout")
+async def auth_logout_get(
+    docupipe_session: Optional[str] = Cookie(default=None, alias=SESSION_COOKIE),
+    docupipe_refresh: Optional[str] = Cookie(default=None, alias=REFRESH_COOKIE),
+):
+    """GET handler for SLO iframe — clears cookies without revoke."""
+    from fastapi.responses import PlainTextResponse
+    resp = PlainTextResponse("logged out", status_code=200)
+    resp.delete_cookie(key=SESSION_COOKIE, path="/")
+    resp.delete_cookie(key=REFRESH_COOKIE, path="/")
+    return resp
+
+
+

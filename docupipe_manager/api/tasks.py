@@ -161,6 +161,8 @@ async def update_task(project_id: uuid.UUID, task_id: uuid.UUID, body: UpdateTas
         await app.state.scheduler.schedule_task(task_id)
     elif "schedule_cron" in data and data["schedule_cron"] is None:
         await app.state.scheduler.unschedule_task(task_id)
+    elif data.get("schedule_enabled") is False:
+        await app.state.scheduler.unschedule_task(task_id)
     return {"status": "updated"}
 
 

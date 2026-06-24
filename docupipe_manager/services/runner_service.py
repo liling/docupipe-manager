@@ -2,12 +2,11 @@ import asyncio
 import logging
 import os
 import shlex
-import shutil
 import signal
 import uuid
 from collections import deque
 from datetime import datetime, timezone
-from tempfile import mkdtemp
+import tempfile
 
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker
@@ -186,22 +185,31 @@ class RunnerService:
         os.makedirs(log_dir, exist_ok=True)
         log_path = os.path.join(log_dir, f"{run_id}.log")
 
-        home_dir = mkdtemp(prefix="dws-home-")
         try:
+            auth_temp_path = None
+            imported = False
             if credential is not None:
                 key_hex = settings.encryption_key
                 auth_b64 = decrypt_sm4(credential.auth_blob.hex(), key_hex)
 
-                auth_path = os.path.join(home_dir, "auth.b64")
-                with open(auth_path, "w") as f:
+                fd, auth_temp_path = tempfile.mkstemp(suffix=".b64", prefix="dws-run-")
+                os.close(fd)
+                with open(auth_temp_path, "w") as f:
                     f.write(auth_b64)
 
-                import_proc = await asyncio.create_subprocess_exec(
-                    settings.dws_cli_path, "auth", "import", "-i", auth_path, "--base64",
+                # 使用真实 HOME 保证钥匙串可访问，先清理残留会话再导入
+                logout_before = await asyncio.create_subprocess_exec(
+                    settings.dws_cli_path, "auth", "logout",
                     stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
-                    env={**os.environ, **project_env, "HOME": home_dir},
+                )
+                await logout_before.communicate()
+
+                import_proc = await asyncio.create_subprocess_exec(
+                    settings.dws_cli_path, "auth", "import", "--base64", "-i", auth_temp_path,
+                    stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
                 )
                 await import_proc.communicate()
+                imported = True
 
             cmd = [
                 settings.docupipe_python, "-m", "docupipe",
@@ -230,7 +238,7 @@ class RunnerService:
             proc = await asyncio.create_subprocess_exec(
                 *cmd,
                 stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT,
-                env={**os.environ, **project_env, "HOME": home_dir},
+                env={**os.environ, **project_env},
                 cwd=project_dir,
             )
 
@@ -288,7 +296,21 @@ class RunnerService:
             }))
 
         finally:
-            shutil.rmtree(home_dir, ignore_errors=True)
+            if auth_temp_path:
+                try:
+                    os.unlink(auth_temp_path)
+                except OSError:
+                    pass
+            # 清理 dws 会话，避免影响用户终端
+            if imported:
+                try:
+                    logout_proc = await asyncio.create_subprocess_exec(
+                        settings.dws_cli_path, "auth", "logout",
+                        stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+                    )
+                    await logout_proc.communicate()
+                except Exception:
+                    pass
 
     async def _mark_run_failed(self, run_id: uuid.UUID, error_message: str) -> None:
         try:

@@ -27,10 +27,6 @@ async def get_current_user(
     authorization: Optional[str] = Header(default=None),
     settings: Settings = Depends(_get_settings),
 ) -> dict:
-    if settings.dev_mode:
-        import uuid
-        return {"id": str(uuid.uuid4()), "username": "dev-admin", "role": "admin"}
-
     token = _extract_token(docupipe_session, authorization)
     if not token:
         raise HTTPException(

@@ -1,22 +1,35 @@
 import asyncio
+import binascii
 import json
 import logging
 import os
 import shutil
 import time
 import uuid
+from datetime import datetime, timezone
 from tempfile import mkdtemp
+import tempfile
 
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
+from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker
 
 from docupipe_manager.config import Settings
 from docupipe_manager.crypto import decrypt_sm4, encrypt_sm4
 from docupipe_manager.models.dws_credential import CredentialStatus, DwsCredential
-from sqlalchemy import not_
+from docupipe_manager.models.task import CredentialType
 from docupipe_manager.platform.client import XinyiPlatformClient
 
 logger = logging.getLogger(__name__)
+
+
+def _parse_dt(s: str | None) -> datetime | None:
+    """宽松解析 ISO 8601 字符串（兼容 'Z' 后缀）；失败返回 None。"""
+    if not s:
+        return None
+    try:
+        return datetime.fromisoformat(s.replace("Z", "+00:00"))
+    except (ValueError, TypeError):
+        return None
 
 
 class CredentialService:
@@ -28,11 +41,13 @@ class CredentialService:
         self._platform_client = platform_client
         self._session_factory = async_sessionmaker(engine, expire_on_commit=False)
         self._active_sessions: dict[str, dict] = {}
+        self._dws_lock = asyncio.Lock()
 
     async def start_device_login(self, project_id: uuid.UUID, name: str) -> dict:
         """Start dws auth login --device, return verification_url + user_code + session_key."""
         session_key = uuid.uuid4().hex
         home_dir = mkdtemp(prefix="dws-device-")
+        os.makedirs(os.path.join(home_dir, "Library", "Keychains"), exist_ok=True)
 
         proc = await asyncio.create_subprocess_exec(
             self._settings.dws_cli_path, "auth", "login", "--device",
@@ -101,8 +116,8 @@ class CredentialService:
             stdout, _ = await status_proc.communicate()
             status_data = json.loads(stdout.decode()) if stdout else {}
             corp_id = status_data.get("corp_id", "")
-            token_expires_at_str = status_data.get("token_expires_at")
-            refresh_expires_at_str = status_data.get("refresh_token_expires_at")
+            token_expires_at_str = status_data.get("expires_at")
+            refresh_expires_at_str = status_data.get("refresh_expires_at")
 
             export_path = os.path.join(home_dir, "dws-export.b64")
             export_proc = await asyncio.create_subprocess_exec(
@@ -127,8 +142,9 @@ class CredentialService:
             name=name,
             corp_id=corp_id,
             auth_blob=bytes.fromhex(auth_blob_hex),
-            token_expires_at=None,
-            refresh_token_expires_at=None,
+            token_expires_at=_parse_dt(token_expires_at_str),
+            refresh_token_expires_at=_parse_dt(refresh_expires_at_str),
+            credential_type=CredentialType.dws,
             status=CredentialStatus.active,
             created_by=user_id,
             project_id=project_id,
@@ -149,40 +165,132 @@ class CredentialService:
 
         return credential
 
+    async def create_from_import(
+        self, project_id: uuid.UUID, name: str, auth_b64: str, user_id: uuid.UUID
+    ) -> DwsCredential:
+        """方式 A：用户粘贴/上传 dws auth export 的 base64，import+status 验证后加密存储。"""
+        meta = await self._probe_auth_blob(auth_b64)
+
+        key_hex = self._settings.encryption_key
+        auth_blob_hex = encrypt_sm4(auth_b64, key_hex)
+
+        credential = DwsCredential(
+            name=name,
+            corp_id=meta.get("corp_id", ""),
+            auth_blob=bytes.fromhex(auth_blob_hex),
+            token_expires_at=_parse_dt(meta.get("expires_at")),
+            refresh_token_expires_at=_parse_dt(meta.get("refresh_expires_at")),
+            credential_type=CredentialType.dws,
+            status=CredentialStatus.active,
+            created_by=user_id,
+            project_id=project_id,
+        )
+
+        async with self._session_factory() as db_session:
+            db_session.add(credential)
+            await db_session.commit()
+            await db_session.refresh(credential)
+
+        asyncio.create_task(self._platform_client.push_audit({
+            "event": "docupipe.credential.create",
+            "credential_id": str(credential.id),
+            "name": name,
+            "source": "import",
+        }))
+        return credential
+
+    async def _probe_auth_blob(self, auth_b64: str) -> dict:
+        """import base64 凭证 + status 探测，返回元数据。使用真实 HOME 保证 macOS 钥匙串可访问。
+        base64 非法 / import 失败抛 ValueError。
+        串行锁 _dws_lock 避免多个进程同时操作真实 HOME 的 ~/.dws 状态。"""
+        try:
+            binascii.a2b_base64(auth_b64.encode("utf-8"))
+        except (binascii.Error, ValueError) as e:
+            raise ValueError(f"auth_blob 不是合法的 base64: {e}") from e
+
+        async with self._dws_lock:
+            fd, import_path = tempfile.mkstemp(suffix=".b64", prefix="dws-auth-")
+            os.close(fd)
+            try:
+                with open(import_path, "w") as f:
+                    f.write(auth_b64)
+
+                logout_proc = await asyncio.create_subprocess_exec(
+                    self._settings.dws_cli_path, "auth", "logout",
+                    stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+                )
+                await logout_proc.communicate()
+
+                import_proc = await asyncio.create_subprocess_exec(
+                    self._settings.dws_cli_path, "auth", "import", "--base64", "-i", import_path,
+                    stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+                )
+                try:
+                    stdout, stderr = await asyncio.wait_for(import_proc.communicate(), timeout=30)
+                except asyncio.TimeoutError:
+                    import_proc.kill()
+                    raise ValueError("dws auth import 超时")
+                if import_proc.returncode != 0:
+                    detail = stderr.decode().strip() if stderr else ""
+                    msg = "dws auth import 失败：凭证无效"
+                    if detail:
+                        msg += f"（{detail}）"
+                    raise ValueError(msg)
+
+                status_proc = await asyncio.create_subprocess_exec(
+                    self._settings.dws_cli_path, "auth", "status", "--format", "json",
+                    stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+                )
+                try:
+                    stdout, _ = await asyncio.wait_for(status_proc.communicate(), timeout=30)
+                except asyncio.TimeoutError:
+                    status_proc.kill()
+                    raise ValueError("dws auth status 超时")
+                return json.loads(stdout.decode()) if stdout else {}
+            finally:
+                os.unlink(import_path)
+
     async def check_status(self, credential_id: uuid.UUID, project_id: uuid.UUID) -> dict:
-        """Read credential from DB and check dws auth status in a temp HOME."""
+        """测试凭证可用性并回写最新 corp_id/过期时间/status。"""
         async with self._session_factory() as db_session:
             credential = await db_session.get(DwsCredential, credential_id)
             if credential is None or credential.project_id != project_id:
                 raise ValueError("Credential not found")
+            key_hex = self._settings.encryption_key
+            auth_b64 = decrypt_sm4(credential.auth_blob.hex(), key_hex)
 
-        key_hex = self._settings.encryption_key
-        auth_b64 = decrypt_sm4(credential.auth_blob.hex(), key_hex)
-
-        home_dir = mkdtemp(prefix="dws-check-")
         try:
-            import_path = os.path.join(home_dir, "auth.b64")
-            with open(import_path, "w") as f:
-                f.write(auth_b64)
+            meta = await self._probe_auth_blob(auth_b64)
+        except ValueError as e:
+            async with self._session_factory() as db_session:
+                credential = await db_session.get(DwsCredential, credential_id)
+                credential.status = CredentialStatus.expired
+                await db_session.commit()
+            return {"status": "expired", "corp_id": credential.corp_id if credential else "",
+                    "token_expires_at": None, "refresh_token_expires_at": None, "error": str(e)}
 
-            import_proc = await asyncio.create_subprocess_exec(
-                self._settings.dws_cli_path, "auth", "import", "-i", import_path, "--base64",
-                stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
-                env={**os.environ, "HOME": home_dir},
-            )
-            await import_proc.communicate()
+        corp_id = meta.get("corp_id") or ""
+        token_exp = _parse_dt(meta.get("expires_at"))
+        refresh_exp = _parse_dt(meta.get("refresh_expires_at"))
+        now = datetime.now(timezone.utc)
+        new_status = (CredentialStatus.expired
+                      if (refresh_exp is not None and refresh_exp < now)
+                      else CredentialStatus.active)
 
-            status_proc = await asyncio.create_subprocess_exec(
-                self._settings.dws_cli_path, "auth", "status", "--format", "json",
-                stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
-                env={**os.environ, "HOME": home_dir},
-            )
-            stdout, _ = await status_proc.communicate()
-            status_data = json.loads(stdout.decode()) if stdout else {}
-        finally:
-            shutil.rmtree(home_dir, ignore_errors=True)
+        async with self._session_factory() as db_session:
+            credential = await db_session.get(DwsCredential, credential_id)
+            credential.corp_id = corp_id
+            if token_exp is not None:
+                credential.token_expires_at = token_exp
+            if refresh_exp is not None:
+                credential.refresh_token_expires_at = refresh_exp
+            credential.status = new_status
+            await db_session.commit()
 
-        return status_data
+        return {"status": new_status.value, "corp_id": corp_id,
+                "token_expires_at": str(token_exp) if token_exp else None,
+                "refresh_token_expires_at": str(refresh_exp) if refresh_exp else None,
+                "error": None}
 
     async def revoke(self, credential_id: uuid.UUID, user_id: uuid.UUID, project_id: uuid.UUID) -> None:
         """Mark credential as revoked (soft delete)."""
@@ -197,6 +305,18 @@ class CredentialService:
             "event": "docupipe.credential.revoke",
             "credential_id": str(credential_id),
         }))
+
+    async def rename_credential(
+        self, credential_id: uuid.UUID, new_name: str, project_id: uuid.UUID
+    ) -> DwsCredential:
+        async with self._session_factory() as db_session:
+            credential = await db_session.get(DwsCredential, credential_id)
+            if credential is None or credential.project_id != project_id:
+                raise ValueError("Credential not found")
+            credential.name = new_name
+            await db_session.commit()
+            await db_session.refresh(credential)
+            return credential
 
     def _cleanup_session(self, session_key: str) -> None:
         session = self._active_sessions.pop(session_key, None)

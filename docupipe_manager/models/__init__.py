@@ -2,13 +2,14 @@ from docupipe_manager.models.dws_credential import CredentialStatus, DwsCredenti
 from docupipe_manager.models.pipeline_run import PipelineRun, RunStatus, RunTriggerType
 from docupipe_manager.models.project import Project, ProjectStatus
 from docupipe_manager.models.project_env_var import ProjectEnvVar
-from docupipe_manager.models.project_member import ProjectMember
+from docupipe_manager.models.project_member import MemberRole, ProjectMember
 from docupipe_manager.models.task import CredentialType, Task, TaskStatus
 
 __all__ = [
     "CredentialStatus",
     "CredentialType",
     "DwsCredential",
+    "MemberRole",
     "PipelineRun",
     "Project",
     "ProjectEnvVar",

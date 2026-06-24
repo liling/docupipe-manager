@@ -31,7 +31,7 @@ function renderMeta(m) {
   document.getElementById("run-started-at").textContent = m.started_at || "—";
   document.getElementById("run-completed-at").textContent = m.completed_at || "—";
   const dl = document.getElementById("run-download");
-  dl.href = `/api/runs/${runId}/download-log`;
+  dl.href = `${API_PREFIX}/api/runs/${runId}/download-log`;
   const cancelBtn = document.getElementById("run-cancel");
   if (m.project_id) {
     document.getElementById("run-back").href = `/docupipe/projects/${m.project_id}#runs`;
@@ -40,7 +40,7 @@ function renderMeta(m) {
     cancelBtn.classList.remove("hidden");
     cancelBtn.onclick = async () => {
       if (!confirm("确认取消此运行？")) return;
-      const r = await fetch(`/api/runs/${runId}/cancel`, {method: "POST"});
+      const r = await fetch(`${API_PREFIX}/api/runs/${runId}/cancel`, {method: "POST"});
       if (!r.ok) alert("取消失败");
     };
   }
@@ -52,10 +52,13 @@ function finalize(end) {
   tag.className = "status-tag " + statusTagClass(end.status);
   document.getElementById("run-exit-code").textContent =
     end.exit_code === null || end.exit_code === undefined ? "—" : end.exit_code;
+  document.getElementById("run-command").textContent = end.command_text || "—";
+  document.getElementById("run-started-at").textContent = end.started_at || "—";
+  document.getElementById("run-completed-at").textContent = end.completed_at || "—";
   document.getElementById("run-cancel").classList.add("hidden");
 }
 
-const es = new EventSource(`/api/runs/${runId}/stream`);
+const es = new EventSource(`${API_PREFIX}/api/runs/${runId}/stream`);
 es.addEventListener("meta", e => renderMeta(JSON.parse(e.data)));
 es.addEventListener("log", e => appendLine(JSON.parse(e.data)));
 es.addEventListener("end", e => { finalize(JSON.parse(e.data)); es.close(); });

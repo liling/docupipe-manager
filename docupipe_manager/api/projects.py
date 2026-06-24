@@ -8,6 +8,7 @@ from sqlalchemy import insert
 
 from docupipe_manager.auth.dependencies import get_current_user, require_admin
 from docupipe_manager.models.project import Project, ProjectStatus
+from docupipe_manager.models.project_member import MemberRole, ProjectMember
 
 admin_router = APIRouter(prefix="/admin/api/projects", tags=["projects"])
 router = APIRouter(prefix="/api/projects", tags=["projects"])
@@ -60,16 +61,16 @@ async def _require_owner_async(project_id: uuid.UUID, user: dict = Depends(get_c
                         detail="Project not found" if exists is None else "Project owner required")
 
 
-def _project_dict(row, include_owner=False, current_user=None) -> dict:
+def _project_dict(row, is_owner: bool | None = None, can_manage_members: bool | None = None) -> dict:
     d = {
         "id": str(row.id), "name": row.name, "slug": row.slug,
         "description": row.description,
         "status": row.status.value if hasattr(row.status, "value") else row.status,
         "created_at": str(row.created_at),
     }
-    if include_owner and current_user is not None:
-        d["is_owner"] = (str(row.owner_id) == current_user["id"]) or current_user.get("role") == "admin"
-        d["can_manage_members"] = bool(d["is_owner"])
+    if is_owner is not None:
+        d["is_owner"] = is_owner
+        d["can_manage_members"] = is_owner
     return d
 
 
@@ -88,7 +89,13 @@ async def create_project(body: CreateProjectRequest, user: dict = Depends(requir
             insert(Project).values(
                 id=project_id, name=body.name, slug=body.slug,
                 description=body.description,
-                owner_id=uuid.UUID(user["id"]),
+            )
+        )
+        await conn.execute(
+            insert(ProjectMember).values(
+                user_id=uuid.UUID(user["id"]),
+                project_id=project_id,
+                role=MemberRole.OWNER,
             )
         )
     return {"id": str(project_id)}
@@ -117,13 +124,18 @@ async def list_projects(user: dict = Depends(get_current_user)):
 
 @router.get("/{project_id}")
 async def get_project(project_id: uuid.UUID, user: dict = Depends(_require_access_async)):
-    from sqlalchemy import select
+    from sqlalchemy import select, text
     engine = _get_engine()
     async with engine.begin() as conn:
         row = (await conn.execute(select(Project).where(Project.id == project_id))).fetchone()
-    if row is None:
-        raise HTTPException(status_code=404, detail="Project not found")
-    return _project_dict(row, include_owner=True, current_user=user)
+        if row is None:
+            raise HTTPException(status_code=404, detail="Project not found")
+        membership = (await conn.execute(
+            text("SELECT role FROM docupipe_manager.project_members WHERE project_id = :pid AND user_id = :uid"),
+            {"pid": str(project_id), "uid": user["id"]},
+        )).fetchone()
+    is_owner = (membership and membership.role == "owner") or user.get("role") == "admin"
+    return _project_dict(row, is_owner=is_owner, can_manage_members=is_owner)
 
 
 @router.put("/{project_id}")

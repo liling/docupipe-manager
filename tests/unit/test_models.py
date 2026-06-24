@@ -50,3 +50,9 @@ def test_project_env_var_mapping():
     assert "created_at" in cols
     assert "updated_at" in cols
     assert cols["is_secret"].default is not None
+
+
+def test_dws_credential_has_credential_type():
+    cols = DwsCredential.__table__.columns
+    assert "credential_type" in cols
+    assert cols["credential_type"].default is not None

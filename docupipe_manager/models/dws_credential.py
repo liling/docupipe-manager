@@ -2,11 +2,12 @@ import enum
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, Enum, ForeignKey, String, UniqueConstraint, func
+from sqlalchemy import DateTime, Enum, ForeignKey, Index, String, func, text
 from sqlalchemy.dialects.postgresql import BYTEA, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from docupipe_manager.models.base import Base
+from docupipe_manager.models.task import CredentialType
 
 _SCHEMA = "docupipe_manager"
 
@@ -20,7 +21,12 @@ class CredentialStatus(str, enum.Enum):
 class DwsCredential(Base):
     __tablename__ = "dws_credentials"
     __table_args__ = (
-        UniqueConstraint("project_id", "name", name="uq_dws_credentials_project_name"),
+        Index(
+            "uq_dws_credentials_project_active_name",
+            "project_id", "name",
+            unique=True,
+            postgresql_where=text("status != 'revoked'"),
+        ),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID, primary_key=True, default=uuid.uuid4)
@@ -36,6 +42,11 @@ class DwsCredential(Base):
     status: Mapped[CredentialStatus] = mapped_column(
         Enum(CredentialStatus, name="credential_status", schema=_SCHEMA, create_constraint=True),
         default=CredentialStatus.active,
+        nullable=False,
+    )
+    credential_type: Mapped[CredentialType] = mapped_column(
+        Enum(CredentialType, name="credential_type", schema=_SCHEMA, create_constraint=True),
+        default=CredentialType.dws,
         nullable=False,
     )
     created_by: Mapped[uuid.UUID] = mapped_column(UUID, nullable=False)

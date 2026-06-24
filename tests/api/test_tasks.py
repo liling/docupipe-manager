@@ -13,7 +13,7 @@ VALID_YAML = "pipelines:\n  - name: p1\n"
 async def test_create_task_invalid_yaml(async_client):
     override_get_current_user({"id": str(uuid.uuid4()), "role": "admin"})
     pid = uuid.uuid4()
-    r = await async_client.post(f"/api/projects/{pid}/tasks",
+    r = await async_client.post(f"/docupipe/api/projects/{pid}/tasks",
                                 json={"name": "t", "slug": "t", "config_yaml": "not: a: list"})
     assert r.status_code == 422
     clear_overrides()
@@ -32,7 +32,7 @@ async def test_create_task_ok(async_client):
         mock_ge.return_value = mock_engine
         with patch("docupipe_manager.main.app") as mock_app:
             mock_app.state.scheduler.schedule_task = AsyncMock()
-            r = await async_client.post(f"/api/projects/{pid}/tasks",
+            r = await async_client.post(f"/docupipe/api/projects/{pid}/tasks",
                                         json={"name": "t", "slug": "t", "config_yaml": VALID_YAML})
             assert r.status_code == 200
             assert "id" in r.json()
@@ -51,7 +51,7 @@ async def test_get_task_not_found(async_client):
         mock_engine.begin.return_value.__aenter__ = AsyncMock(return_value=mock_conn)
         mock_engine.begin.return_value.__aexit__ = AsyncMock(return_value=None)
         mock_ge.return_value = mock_engine
-        r = await async_client.get(f"/api/projects/{pid}/tasks/{task_id}")
+        r = await async_client.get(f"/docupipe/api/projects/{pid}/tasks/{task_id}")
         assert r.status_code == 404
     clear_overrides()
 
@@ -81,7 +81,7 @@ async def test_get_task_ok(async_client):
         mock_engine.begin.return_value.__aenter__ = AsyncMock(return_value=mock_conn)
         mock_engine.begin.return_value.__aexit__ = AsyncMock(return_value=None)
         mock_ge.return_value = mock_engine
-        r = await async_client.get(f"/api/projects/{pid}/tasks/{task_id}")
+        r = await async_client.get(f"/docupipe/api/projects/{pid}/tasks/{task_id}")
         assert r.status_code == 200
         data = r.json()
         assert data["name"] == "test-task"
@@ -109,7 +109,7 @@ async def test_trigger_task_ok(async_client):
         mock_ge.return_value = mock_engine
         with patch("docupipe_manager.main.app") as mock_app:
             mock_app.state.runner.start_run = AsyncMock(return_value=mock_run)
-            r = await async_client.post(f"/api/projects/{pid}/tasks/{task_id}/trigger", json={})
+            r = await async_client.post(f"/docupipe/api/projects/{pid}/tasks/{task_id}/trigger", json={})
             assert r.status_code == 200
             data = r.json()
             assert data["run_id"] == str(mock_run.id)

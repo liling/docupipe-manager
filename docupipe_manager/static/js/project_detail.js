@@ -8,7 +8,7 @@ function statusTagClass(status) {
 }
 
 async function loadProject() {
-  const r = await fetch(`/api/projects/${pid}`);
+  const r = await fetch(`${API_PREFIX}/api/projects/${pid}`);
   if (!r.ok) { location.href = "/docupipe/projects"; return; }
   const p = await r.json();
   document.getElementById("proj-name").textContent = p.name;
@@ -18,7 +18,7 @@ async function loadProject() {
 }
 
 async function loadTasks() {
-  const r = await fetch(`/api/projects/${pid}/tasks`);
+  const r = await fetch(`${API_PREFIX}/api/projects/${pid}/tasks`);
   const tasks = await r.json();
   const box = document.getElementById("tab-tasks");
   if (!tasks.length) {
@@ -27,20 +27,20 @@ async function loadTasks() {
   }
   box.innerHTML =
     `<div style="margin-bottom:10px"><a class="btn btn-sm btn-primary" href="/docupipe/projects/${pid}/tasks/new">新建任务</a></div>` +
-    `<div class="stack">` +
+    `<table class="data-table"><thead><tr><th>名称</th><th>Slug</th><th>调度</th><th>上次状态</th><th>操作</th></tr></thead><tbody>` +
     tasks.map(t => `
-    <div class="card-row">
-      <div class="card-row-main">
-        <a class="card-row-title" href="/docupipe/projects/${pid}/tasks/${t.id}/edit" style="text-decoration:none">${t.name}</a>
-        <span class="card-row-meta-inline">${t.schedule_cron || "手动"} · ${t.schedule_mode}</span>
-      </div>
-      <div class="card-row-actions">
-        ${t.last_run_status ? `<span class="status-tag ${statusTagClass(t.last_run_status)}">${t.last_run_status}</span>` : ""}
+    <tr>
+      <td>${t.name} <span class="card-row-meta-inline">${t.schedule_mode}</span></td>
+      <td><code>${t.slug}</code></td>
+      <td>${t.schedule_cron || "手动"}</td>
+      <td>${t.last_run_status ? `<span class="status-tag ${statusTagClass(t.last_run_status)}">${t.last_run_status}</span>` : "—"}</td>
+      <td class="action-cell">
+        <a class="btn btn-sm btn-secondary" href="/docupipe/projects/${pid}/tasks/${t.id}/edit">编辑</a>
         <button class="btn btn-sm btn-secondary trigger" data-id="${t.id}">触发</button>
-      </div>
-    </div>`).join("") + `</div>`;
+      </td>
+    </tr>`).join("") + `</tbody></table>`;
   box.querySelectorAll(".trigger").forEach(b => b.addEventListener("click", async () => {
-    const r = await fetch(`/api/projects/${pid}/tasks/${b.dataset.id}/trigger`, {method: "POST", headers: {"Content-Type": "application/json"}, body: "{}"});
+    const r = await fetch(`${API_PREFIX}/api/projects/${pid}/tasks/${b.dataset.id}/trigger`, {method: "POST", headers: {"Content-Type": "application/json"}, body: "{}"});
     if (r.ok) {
       const data = await r.json();
       location.href = `/docupipe/runs/${data.run_id}`;
@@ -51,186 +51,329 @@ async function loadTasks() {
 }
 
 async function loadCredentials() {
-  const r = await fetch(`/api/projects/${pid}/credentials`);
+  const r = await fetch(`${API_PREFIX}/api/projects/${pid}/credentials`);
   const creds = await r.json();
   const box = document.getElementById("tab-credentials");
 
-  let html = '<div style="margin-bottom:10px"><button class="btn btn-sm btn-primary" id="device-start">添加凭证（设备码）</button></div>';
-  html += '<div id="device-flow" class="hidden card device-flow"></div>';
+  let html = '<div style="margin-bottom:10px"><button class="btn btn-sm btn-primary" id="cred-add">添加凭证</button></div>';
+  html += '<div id="cred-dialog-mount"></div>';
 
   if (!creds.length) {
     html += '<div class="empty-state">暂无凭证。</div>';
   } else {
-    html += '<table class="data-table"><thead><tr><th>名称</th><th>CorpId</th><th>状态</th><th>过期时间</th><th>操作</th></tr></thead><tbody>';
+    html += '<table class="data-table"><thead><tr><th>名称</th><th>类型</th><th>CorpId</th><th>状态</th><th>Access 过期</th><th>Refresh 过期</th><th>操作</th></tr></thead><tbody>';
     for (const c of creds) {
       html += `<tr>
         <td>${c.name}</td>
+        <td><span class="status-tag">${(c.credential_type || "dws").toUpperCase()}</span></td>
         <td>${c.corp_id ? `<code>${c.corp_id}</code>` : "—"}</td>
         <td><span class="status-tag ${statusTagClass(c.status)}">${c.status}</span></td>
-        <td>${c.token_expires_at || "—"}</td>
-        <td class="action-cell"><button class="btn btn-sm btn-danger revoke-cred" data-id="${c.id}">吊销</button></td>
+        <td>${fmtExpires(c.token_expires_at)}</td>
+        <td class="text-muted">${fmtExpires(c.refresh_token_expires_at)}</td>
+        <td class="action-cell">
+          <button class="btn btn-sm btn-secondary edit-cred" data-id="${c.id}" data-name="${c.name}">编辑</button>
+          <button class="btn btn-sm btn-secondary test-cred" data-id="${c.id}">测试</button>
+          <button class="btn btn-sm btn-danger revoke-cred" data-id="${c.id}">吊销</button>
+        </td>
       </tr>`;
     }
     html += '</tbody></table>';
   }
   box.innerHTML = html;
 
-  let sessionKey = null;
+  document.getElementById("cred-add").addEventListener("click", () => showCredentialDialog());
+  box.querySelectorAll(".revoke-cred").forEach(b => b.addEventListener("click", async () => {
+    if (!confirm("确认吊销此凭证？")) return;
+    const rr = await fetch(`${API_PREFIX}/api/projects/${pid}/credentials/${b.dataset.id}`, {method: "DELETE"});
+    if (rr.ok) { loadCredentials(); } else { alert("吊销失败"); }
+  }));
+  box.querySelectorAll(".test-cred").forEach(b => b.addEventListener("click", async (e) => {
+    const btn = e.currentTarget;
+    const old = btn.textContent; btn.textContent = "测试中..."; btn.disabled = true;
+    const tr = await fetch(`${API_PREFIX}/api/projects/${pid}/credentials/${b.dataset.id}/test`, {method: "POST"});
+    if (!tr.ok) { alert("请求失败"); btn.textContent = old; btn.disabled = false; loadCredentials(); return; }
+    const data = await tr.json();
+    btn.textContent = old; btn.disabled = false;
+    showTestResult(data);
+    loadCredentials();
+  }));
+  box.querySelectorAll(".edit-cred").forEach(b => b.addEventListener("click", () => showRenameDialog(b.dataset.id, b.dataset.name)));
+}
 
-  document.getElementById("device-start").addEventListener("click", async () => {
-    const name = prompt("请输入凭证名称：");
-    if (!name) return;
-    const flowBox = document.getElementById("device-flow");
-    flowBox.classList.remove("hidden");
-    flowBox.innerHTML = '<p class="card-row-meta">启动设备登录...</p>';
-    try {
-      const r = await fetch(`/api/projects/${pid}/credentials/device-login/start?name=${encodeURIComponent(name)}`);
-      if (!r.ok) { flowBox.innerHTML = '<p class="status-tag is-failed">启动失败</p>'; return; }
-      const data = await r.json();
+function fmtExpires(s) {
+  if (!s) return "—";
+  const dt = new Date(s);
+  if (isNaN(dt)) return s;
+  const now = new Date();
+  const diff = dt - now;
+  const abs = Math.abs(diff);
+  const days = Math.floor(abs / 86400000);
+  const hours = Math.floor((abs % 86400000) / 3600000);
+  const rel = diff >= 0 ? `还剩 ${days}天${hours}h` : `已过期 ${days}天${hours}h`;
+  const cls = diff < 0 ? "is-failed" : (abs < 86400000 ? "is-running" : "");
+  return `<span class="status-tag ${cls}">${dt.toLocaleString()} · ${rel}</span>`;
+}
+
+function showCredentialDialog() {
+  let dialog = document.getElementById("cred-dialog");
+  if (!dialog) {
+    dialog = document.createElement("dialog");
+    dialog.id = "cred-dialog";
+    document.body.appendChild(dialog);
+  }
+  dialog.innerHTML = `
+    <h3 style="margin:0 0 16px">添加凭证</h3>
+    <div class="form-group"><label>凭证类型</label>
+      <select id="cred-type" class="form-control"><option value="dws">DWS（钉钉）</option></select></div>
+    <div class="form-group"><label>创建方式</label>
+      <div class="check-row">
+        <label><input type="radio" name="cred-mode" value="import" checked> 导入已有凭证</label>
+        <label><input type="radio" name="cred-mode" value="device"> 设备码登录</label>
+      </div></div>
+    <div class="form-group"><label>凭证名称</label>
+      <input id="cred-name" class="form-control" placeholder="凭证名称"></div>
+    <div id="cred-import-area">
+      <div class="form-group"><label>粘贴 base64（dws auth export --base64 输出）</label>
+        <textarea id="cred-blob" class="form-control" rows="5" placeholder="粘贴 base64 文本"></textarea></div>
+      <div class="form-group"><label>或上传文件</label>
+        <input type="file" id="cred-file" class="form-control"></div>
+    </div>
+    <div id="cred-device-area" class="hidden"></div>
+    <div class="form-actions" style="margin-top:16px">
+      <button class="btn btn-sm btn-primary" id="cred-save">保存</button>
+      <button class="btn btn-sm btn-secondary" id="cred-cancel">取消</button>
+    </div>`;
+  dialog.showModal();
+
+  const importArea = dialog.querySelector("#cred-import-area");
+  const deviceArea = dialog.querySelector("#cred-device-area");
+  const saveBtn = dialog.querySelector("#cred-save");
+
+  dialog.querySelectorAll('input[name="cred-mode"]').forEach(r => r.addEventListener("change", () => {
+    const mode = dialog.querySelector('input[name="cred-mode"]:checked').value;
+    importArea.classList.toggle("hidden", mode !== "import");
+    deviceArea.classList.toggle("hidden", mode !== "device");
+    saveBtn.style.display = mode === "import" ? "" : "none";
+    if (mode === "device") startDeviceFlow(deviceArea, dialog);
+  }));
+
+  dialog.querySelector("#cred-file").addEventListener("change", (e) => {
+    const f = e.target.files[0];
+    if (!f) return;
+    const reader = new FileReader();
+    reader.onload = () => { dialog.querySelector("#cred-blob").value = reader.result; };
+    reader.readAsText(f);
+  });
+
+  dialog.querySelector("#cred-cancel").addEventListener("click", () => dialog.close());
+  dialog.addEventListener("click", (e) => { if (e.target === dialog) dialog.close(); });
+
+  saveBtn.addEventListener("click", async () => {
+    const name = dialog.querySelector("#cred-name").value.trim();
+    const auth_blob = dialog.querySelector("#cred-blob").value.trim();
+    if (!name) { alert("请输入凭证名称"); return; }
+    if (!auth_blob) { alert("请粘贴或上传凭证内容"); return; }
+    saveBtn.disabled = true;
+    const rr = await fetch(`${API_PREFIX}/api/projects/${pid}/credentials/import`, {
+      method: "POST", headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({name, auth_blob}),
+    });
+    if (rr.ok) { dialog.close(); loadCredentials(); }
+    else { const j = await rr.json(); alert(j.detail || "导入失败"); saveBtn.disabled = false; }
+  });
+}
+
+function startDeviceFlow(area, dialog) {
+  let sessionKey = null;
+  area.innerHTML = '<p class="card-row-meta">启动设备登录...</p>';
+  fetch(`${API_PREFIX}/api/projects/${pid}/credentials/device-login/start?name=${encodeURIComponent(dialog.querySelector("#cred-name").value || "dws-cred")}`, {method: "POST"})
+    .then(r => r.ok ? r.json() : Promise.reject())
+    .then(data => {
       sessionKey = data.session_key;
-      flowBox.innerHTML = `
-        <p>请在浏览器中打开以下链接并输入验证码：</p>
-        <p><a href="${data.verification_url}" target="_blank">${data.verification_url}</a></p>
+      area.innerHTML = `
+        <p>请在浏览器打开：<a href="${data.verification_url}" target="_blank">${data.verification_url}</a></p>
         <p>验证码：<span class="device-code">${data.user_code}</span></p>
         <p class="device-hint">有效期 ${data.expires_in || 300} 秒</p>
         <div class="form-actions">
-          <button class="btn btn-sm btn-primary" id="device-poll">已完成，验证</button>
-          <button class="btn btn-sm btn-secondary" id="device-cancel">取消</button>
-        </div>
-      `;
-      document.getElementById("device-poll").addEventListener("click", async () => {
-        flowBox.innerHTML = '<p class="card-row-meta">验证中...</p>';
-        const pollR = await fetch(`/api/projects/${pid}/credentials/device-login/poll?session_key=${sessionKey}`);
-        if (!pollR.ok) { flowBox.innerHTML = '<p class="status-tag is-failed">验证失败或已过期，请重试</p>'; return; }
-        const pollData = await pollR.json();
-        if (pollData.status === "authorized") {
-          const finalR = await fetch(`/api/projects/${pid}/credentials/device-login/finalize`, {
-            method: "POST",
-            headers: {"Content-Type": "application/json"},
-            body: JSON.stringify({session_key: sessionKey, name}),
+          <button class="btn btn-sm btn-primary" id="df-poll">已完成，验证</button>
+        </div>`;
+      area.querySelector("#df-poll").addEventListener("click", async () => {
+        area.innerHTML = '<p class="card-row-meta">验证中...</p>';
+        const pr = await fetch(`${API_PREFIX}/api/projects/${pid}/credentials/device-login/poll?session_key=${sessionKey}`);
+        if (!pr.ok) { area.innerHTML = '<p class="status-tag is-failed">验证失败或已过期</p>'; return; }
+        const pd = await pr.json();
+        if (pd.status === "success" || pd.status === "authorized") {
+          const fr = await fetch(`${API_PREFIX}/api/projects/${pid}/credentials/device-login/finalize`, {
+            method: "POST", headers: {"Content-Type": "application/json"},
+            body: JSON.stringify({session_key: sessionKey, name: dialog.querySelector("#cred-name").value || "dws-cred"}),
           });
-          if (finalR.ok) {
-            flowBox.innerHTML = '<p class="status-tag is-success">✅ 凭证添加成功！</p>';
-            loadCredentials();
-          } else {
-            flowBox.innerHTML = '<p class="status-tag is-failed">最终验证失败</p>';
-          }
+          if (fr.ok) { dialog.close(); loadCredentials(); }
+          else { area.innerHTML = '<p class="status-tag is-failed">最终验证失败</p>'; }
         } else {
-          flowBox.innerHTML = '<p class="status-tag is-running">尚未授权，请在钉钉中扫码确认</p>';
+          area.innerHTML = '<p class="status-tag is-running">尚未授权，请在钉钉扫码确认</p>';
         }
       });
-      document.getElementById("device-cancel").addEventListener("click", () => {
-        flowBox.classList.add("hidden");
-      });
-    } catch (e) {
-      flowBox.innerHTML = '<p class="status-tag is-failed">请求失败</p>';
-    }
-  });
+    })
+    .catch(() => { area.innerHTML = '<p class="status-tag is-failed">启动设备登录失败</p>'; });
+}
 
-  box.querySelectorAll(".revoke-cred").forEach(b => b.addEventListener("click", async () => {
-    if (!confirm("确认吊销此凭证？")) return;
-    const r = await fetch(`/api/projects/${pid}/credentials/${b.dataset.id}`, {method: "DELETE"});
-    if (r.ok) { loadCredentials(); } else { alert("吊销失败"); }
-  }));
+function displayName(user) {
+  return user.display_name || user.username || user.user_id;
+}
+
+function userSubtitle(user) {
+  const parts = [];
+  if (user.username) parts.push(`@${user.username}`);
+  if (user.email) parts.push(user.email);
+  return parts.join(" · ");
 }
 
 async function loadMembers() {
-  const r = await fetch(`/api/projects/${pid}`);
+  const r = await fetch(`${API_PREFIX}/api/projects/${pid}`);
   const project = await r.json();
   const isOwner = project.is_owner;
 
-  const mr = await fetch(`/api/projects/${pid}/members`);
+  const mr = await fetch(`${API_PREFIX}/api/projects/${pid}/members`);
   const data = await mr.json();
   const box = document.getElementById("tab-members");
 
   let html = `<div class="stack">`;
-  html += `<div class="card-row">
-    <div class="card-row-main"><span class="card-row-title">${data.owner.username || data.owner.user_id}</span></div>
-    <span class="status-tag is-success">所有者</span>
-  </div>`;
-
-  if (data.members.length) {
+  if (data.members && data.members.length) {
     for (const m of data.members) {
+      const isMemberOwner = m.role === "owner";
       html += `<div class="card-row">
-        <div class="card-row-main"><span class="card-row-title">${m.username || m.user_id}</span></div>
-        <div class="card-row-actions">
+        <div class="card-row-main">
+          <span class="card-row-title">${displayName(m)}</span>
+          <span class="card-row-meta">${userSubtitle(m)}</span>
+        </div>
+        <div class="card-row-actions" style="display:flex;align-items:center;gap:8px">
+          ${isMemberOwner ? `<span class="status-tag is-success">所有者</span>` : ""}
           <span class="card-row-meta-inline">${m.created_at}</span>
-          ${isOwner ? `<button class="btn btn-sm btn-danger remove-member" data-id="${m.user_id}">移除</button>` : ""}
+          ${isOwner && !isMemberOwner ? `<button class="btn btn-sm btn-danger remove-member" data-id="${m.user_id}">移除</button>` : ""}
         </div>
       </div>`;
     }
+  }
+  if (!data.members || !data.members.length) {
+    html += '<div class="empty-state">暂无成员。</div>';
   }
   html += `</div>`;
 
   if (isOwner) {
     html += `<div class="member-lookup-row" style="margin-top:16px">
-      <input id="member-user-id" placeholder="用户 ID" class="form-control">
-      <button class="btn btn-sm btn-primary" id="add-member-btn">添加成员</button>
+      <input id="member-search-input" placeholder="搜索用户名、姓名、邮箱..." class="form-control" autocomplete="off">
+      <div id="member-search-results" class="search-results-dropdown" style="display:none;position:absolute;background:#fff;border:1px solid #ddd;border-radius:6px;width:100%;max-height:240px;overflow-y:auto;z-index:100;margin-top:2px;box-shadow:0 4px 12px rgba(0,0,0,.1)"></div>
     </div>`;
   }
 
   box.innerHTML = html;
 
   if (isOwner) {
-    document.getElementById("add-member-btn")?.addEventListener("click", async () => {
-      const userId = document.getElementById("member-user-id").value.trim();
-      if (!userId) return;
-      const r = await fetch(`/api/projects/${pid}/members`, {
-        method: "POST",
-        headers: {"Content-Type": "application/json"},
-        body: JSON.stringify({user_id: userId}),
-      });
-      if (r.ok) { loadMembers(); } else { alert((await r.json()).detail || "添加失败"); }
+    let searchTimer = null;
+    const input = document.getElementById("member-search-input");
+    const resultsEl = document.getElementById("member-search-results");
+
+    input.addEventListener("input", () => {
+      clearTimeout(searchTimer);
+      const q = input.value.trim();
+      if (q.length < 1) { resultsEl.style.display = "none"; return; }
+      searchTimer = setTimeout(async () => {
+        const rr = await fetch(`${API_PREFIX}/api/users/search?q=${encodeURIComponent(q)}`);
+        if (!rr.ok) return;
+        const users = await rr.json();
+        if (!users.length) {
+          resultsEl.innerHTML = '<div style="padding:8px 12px;color:#999">未找到用户</div>';
+          resultsEl.style.display = "";
+          return;
+        }
+        resultsEl.innerHTML = users.map(u => `
+          <div class="search-result-item" style="padding:8px 12px;cursor:pointer;border-bottom:1px solid #f0f0f0;display:flex;justify-content:space-between;align-items:center"
+               data-id="${u.id}">
+            <div>
+              <div><strong>${displayName(u)}</strong></div>
+              <div class="card-row-meta">@${u.username}${u.email ? " · " + u.email : ""}</div>
+            </div>
+            <button class="btn btn-sm btn-primary add-search-result" data-id="${u.id}" style="flex-shrink:0">添加</button>
+          </div>
+        `).join("");
+        resultsEl.style.display = "";
+
+        resultsEl.querySelectorAll(".add-search-result").forEach(btn => {
+          btn.addEventListener("click", async (e) => {
+            e.stopPropagation();
+            const userId = btn.dataset.id;
+            const rr = await fetch(`${API_PREFIX}/api/projects/${pid}/members`, {
+              method: "POST",
+              headers: {"Content-Type": "application/json"},
+              body: JSON.stringify({user_id: userId}),
+            });
+            if (rr.ok) {
+              resultsEl.style.display = "none";
+              input.value = "";
+              loadMembers();
+            } else {
+              alert((await rr.json()).detail || "添加失败");
+            }
+          });
+        });
+      }, 300);
+    });
+
+    input.addEventListener("blur", () => {
+      setTimeout(() => { resultsEl.style.display = "none"; }, 200);
+    });
+    input.addEventListener("focus", () => {
+      if (resultsEl.children.length) resultsEl.style.display = "";
     });
 
     box.querySelectorAll(".remove-member").forEach(b => b.addEventListener("click", async () => {
       if (!confirm("确认移除该成员？")) return;
-      const r = await fetch(`/api/projects/${pid}/members/${b.dataset.id}`, {method: "DELETE"});
+      const r = await fetch(`${API_PREFIX}/api/projects/${pid}/members/${b.dataset.id}`, {method: "DELETE"});
       if (r.ok) { loadMembers(); } else { alert("移除失败"); }
     }));
   }
 }
 
+let _runsPage = {page: 1};
+
 async function loadRuns() {
   const box = document.getElementById("tab-runs");
+  const pp = _runsPage.page;
+  const r = await fetch(`${API_PREFIX}/api/runs?project_id=${pid}&page=${pp}&page_size=20`);
+  if (!r.ok) { box.innerHTML = '<div class="empty-state">加载失败</div>'; return; }
+  const data = await r.json();
 
-  const tasksRes = await fetch(`/api/projects/${pid}/tasks`);
-  const tasks = await tasksRes.json();
-  if (!tasks.length) {
+  if (!data.total) {
     box.innerHTML = '<div class="empty-state">暂无运行记录。</div>';
+    _runsPage = {page: 1};
     return;
   }
 
-  const allRuns = [];
-  for (const t of tasks.slice(0, 10)) {
-    const r = await fetch(`/api/runs?task_id=${t.id}&page_size=5`);
-    if (!r.ok) continue;
-    const data = await r.json();
-    for (const run of data.runs) {
-      allRuns.push({...run, task_name: t.name});
-    }
+  let html = `<p class="text-muted" style="margin:0 0 8px">共 ${data.total} 条记录</p>`;
+  html += '<table class="data-table"><thead><tr><th>任务</th><th>流水线</th><th>模式</th><th>状态</th><th>开始时间</th><th>操作</th></tr></thead><tbody>';
+  for (const run of data.runs) {
+    html += `<tr>
+      <td>${run.task_name || run.task_id.slice(0,8)}</td>
+      <td>${run.pipeline_name || "default"}</td>
+      <td>${run.mode}</td>
+      <td><span class="status-tag ${statusTagClass(run.status)}">${run.status}</span></td>
+      <td>${run.started_at ? new Date(run.started_at).toLocaleString() : "—"}</td>
+      <td class="action-cell"><a class="btn btn-sm btn-secondary" href="/docupipe/runs/${run.id}">详情</a></td>
+    </tr>`;
   }
+  html += '</tbody></table>';
 
-  if (!allRuns.length) {
-    box.innerHTML = '<div class="empty-state">暂无运行记录。</div>';
-    return;
-  }
+  const totalPages = Math.ceil(data.total / data.page_size);
+  html += '<div class="form-actions" style="margin-top:8px;align-items:center">';
+  if (pp > 1) html += `<button class="btn btn-sm btn-secondary" id="runs-prev">上一页</button> `;
+  html += `<span class="card-row-meta-inline">第 ${pp}/${totalPages} 页</span>`;
+  if (pp < totalPages) html += ` <button class="btn btn-sm btn-secondary" id="runs-next">下一页</button>`;
+  html += '</div>';
 
-  allRuns.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+  box.innerHTML = html;
 
-  box.innerHTML = '<div class="stack">' +
-    allRuns.slice(0, 50).map(run => `
-      <a class="card-row" href="/docupipe/runs/${run.id}">
-        <div class="card-row-main">
-          <span class="card-row-title">${run.task_name}</span>
-          <span class="card-row-meta-inline">${run.pipeline_name || "default"} · ${run.mode}</span>
-        </div>
-        <div class="card-row-actions">
-          <span class="status-tag ${statusTagClass(run.status)}">${run.status}</span>
-          <span class="card-row-meta-inline">${run.started_at ? new Date(run.started_at).toLocaleString() : ""}</span>
-        </div>
-      </a>`).join("") +
-    '</div>';
+  box.querySelector("#runs-prev")?.addEventListener("click", () => { _runsPage.page--; loadRuns(); });
+  box.querySelector("#runs-next")?.addEventListener("click", () => { _runsPage.page++; loadRuns(); });
 }
 
 async function loadEnvVars() {
@@ -243,7 +386,7 @@ async function loadEnvVars() {
 }
 
 async function refreshEnvList() {
-  const r = await fetch(`/api/projects/${pid}/env-vars`);
+  const r = await fetch(`${API_PREFIX}/api/projects/${pid}/env-vars`);
   const vars = await r.json();
   const list = document.getElementById("env-list");
   if (!vars.length) {
@@ -270,7 +413,7 @@ async function refreshEnvList() {
   list.querySelectorAll(".env-edit").forEach(b => b.addEventListener("click", () => showEnvEditor(b.dataset.id)));
   list.querySelectorAll(".env-del").forEach(b => b.addEventListener("click", async () => {
     if (!confirm("确认删除该环境变量？")) return;
-    const dr = await fetch(`/api/projects/${pid}/env-vars/${b.dataset.id}`, {method: "DELETE"});
+    const dr = await fetch(`${API_PREFIX}/api/projects/${pid}/env-vars/${b.dataset.id}`, {method: "DELETE"});
     if (dr.ok) { refreshEnvList(); } else { alert("删除失败"); }
   }));
 }
@@ -284,7 +427,7 @@ async function showEnvEditor(varId) {
   }
   let v = null;
   if (varId) {
-    const r = await fetch(`/api/projects/${pid}/env-vars`);
+    const r = await fetch(`${API_PREFIX}/api/projects/${pid}/env-vars`);
     const all = await r.json();
     v = all.find(x => x.id === varId);
   }
@@ -330,17 +473,64 @@ async function showEnvEditor(varId) {
       } else if (valField) {
         upd.value = valField;
       }
-      r = await fetch(`/api/projects/${pid}/env-vars/${varId}`, {
+      r = await fetch(`${API_PREFIX}/api/projects/${pid}/env-vars/${varId}`, {
         method: "PUT", headers: {"Content-Type": "application/json"}, body: JSON.stringify(upd),
       });
     } else {
-      r = await fetch(`/api/projects/${pid}/env-vars`, {
+      r = await fetch(`${API_PREFIX}/api/projects/${pid}/env-vars`, {
         method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(body),
       });
     }
     if (r.ok) { dialog.close(); refreshEnvList(); }
     else { const j = await r.json(); alert(j.detail || "保存失败"); }
   });
+}
+
+function showTestResult(data) {
+  let d = document.getElementById("test-result-dialog");
+  if (!d) { d = document.createElement("dialog"); d.id = "test-result-dialog"; document.body.appendChild(d); }
+  const statusCls = data.status === "active" ? "is-success" : "is-failed";
+  const errorHtml = data.error ? `<p class="is-failed status-tag" style="margin-top:8px">${data.error}</p>` : "";
+  d.innerHTML = `
+    <h3 style="margin:0 0 12px">凭证测试结果</h3>
+    <table class="data-table">
+      <tr><td>状态</td><td><span class="status-tag ${statusCls}">${data.status || "?"}</span></td></tr>
+      <tr><td>CorpId</td><td><code>${data.corp_id || "—"}</code></td></tr>
+      <tr><td>Access 过期</td><td>${fmtExpires(data.token_expires_at)}</td></tr>
+      <tr><td>Refresh 过期</td><td class="text-muted">${fmtExpires(data.refresh_token_expires_at)}</td></tr>
+    </table>
+    ${errorHtml}
+    <div class="form-actions" style="margin-top:12px"><button class="btn btn-sm btn-primary" id="test-result-close">关闭</button></div>`;
+  d.showModal();
+  d.querySelector("#test-result-close").onclick = () => d.close();
+  d.onclick = (e) => { if (e.target === d) d.close(); };
+}
+
+function showRenameDialog(id, oldName) {
+  let d = document.getElementById("rename-dialog");
+  if (!d) { d = document.createElement("dialog"); d.id = "rename-dialog"; document.body.appendChild(d); }
+  d.innerHTML = `
+    <h3 style="margin:0 0 16px">凭证改名</h3>
+    <div class="form-group"><label>新名称</label>
+      <input id="rename-input" class="form-control" value="${oldName}"></div>
+    <div class="form-actions" style="margin-top:16px">
+      <button class="btn btn-sm btn-primary" id="rename-save">保存</button>
+      <button class="btn btn-sm btn-secondary" id="rename-cancel">取消</button>
+    </div>`;
+  d.showModal();
+  d.querySelector("#rename-input").focus();
+  d.querySelector("#rename-cancel").onclick = () => d.close();
+  d.onclick = (e) => { if (e.target === d) d.close(); };
+  d.querySelector("#rename-save").onclick = async () => {
+    const name = d.querySelector("#rename-input").value.trim();
+    if (!name) { alert("名称不能为空"); return; }
+    const r = await fetch(`${API_PREFIX}/api/projects/${pid}/credentials/${id}`, {
+      method: "PUT", headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({name}),
+    });
+    if (r.ok) { d.close(); loadCredentials(); }
+    else { const j = await r.json(); alert(j.detail || "改名失败"); }
+  };
 }
 
 loadProject(); loadTasks(); loadEnvVars(); loadCredentials(); loadMembers(); loadRuns();

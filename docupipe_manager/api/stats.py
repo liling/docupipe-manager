@@ -1,5 +1,3 @@
-import uuid
-from typing import Optional
 
 from fastapi import APIRouter, Depends
 
@@ -13,7 +11,7 @@ async def get_stats(
     user: dict = Depends(get_current_user),
 ):
     from docupipe_manager.main import app
-    from sqlalchemy import select, func, text as sqla_text
+    from sqlalchemy import text as sqla_text
 
     engine = app.state.engine
 
@@ -26,11 +24,8 @@ async def get_stats(
             project_count = (await conn.execute(
                 sqla_text("""
                     SELECT COUNT(*) FROM docupipe_manager.projects
-                    WHERE status = 'active' AND (
-                        owner_id = :uid
-                        OR id IN (
-                            SELECT pm.project_id FROM docupipe_manager.project_members pm WHERE pm.user_id = :uid
-                        )
+                    WHERE status = 'active' AND id IN (
+                        SELECT pm.project_id FROM docupipe_manager.project_members pm WHERE pm.user_id = :uid
                     )
                 """),
                 {"uid": user["id"]},

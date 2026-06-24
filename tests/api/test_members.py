@@ -34,15 +34,21 @@ async def test_list_members(async_client):
         mock_engine.begin.return_value.__aexit__ = AsyncMock(return_value=None)
         mock_ge.return_value = mock_engine
         app.state.platform_client.batch_get_users = AsyncMock(return_value={
-            str(owner_id): "owner", str(member_id): "member",
+            owner_id: {"username": "owner", "display_name": "Owner", "email": "owner@x.com", "role": "admin"},
+            member_id: {"username": "member", "display_name": "Member", "email": "member@x.com", "role": "user"},
         })
-        r = await async_client.get(f"/api/projects/{pid}/members")
+        r = await async_client.get(f"/docupipe/api/projects/{pid}/members")
         assert r.status_code == 200
         data = r.json()
         assert data["owner"]["user_id"] == str(owner_id)
         assert data["owner"]["is_owner"] is True
+        assert data["owner"]["username"] == "owner"
+        assert data["owner"]["display_name"] == "Owner"
+        assert data["owner"]["email"] == "owner@x.com"
         assert len(data["members"]) == 1
         assert data["members"][0]["user_id"] == str(member_id)
+        assert data["members"][0]["username"] == "member"
+        assert data["members"][0]["display_name"] == "Member"
     clear_overrides()
 
 
@@ -63,7 +69,7 @@ async def test_add_member_owner_ok(async_client):
         mock_engine.begin.return_value.__aenter__ = AsyncMock(return_value=mock_conn)
         mock_engine.begin.return_value.__aexit__ = AsyncMock(return_value=None)
         mock_ge.return_value = mock_engine
-        r = await async_client.post(f"/api/projects/{pid}/members", json={"user_id": str(uuid.uuid4())})
+        r = await async_client.post(f"/docupipe/api/projects/{pid}/members", json={"user_id": str(uuid.uuid4())})
         assert r.status_code == 200
         assert r.json()["status"] == "added"
     clear_overrides()
@@ -88,7 +94,7 @@ async def test_add_member_duplicate(async_client):
         mock_engine.begin.return_value.__aenter__ = AsyncMock(return_value=mock_conn)
         mock_engine.begin.return_value.__aexit__ = AsyncMock(return_value=None)
         mock_ge.return_value = mock_engine
-        r = await async_client.post(f"/api/projects/{pid}/members", json={"user_id": str(member_id)})
+        r = await async_client.post(f"/docupipe/api/projects/{pid}/members", json={"user_id": str(member_id)})
         assert r.status_code == 409
     clear_overrides()
 
@@ -106,7 +112,7 @@ async def test_add_member_self_owner(async_client):
         mock_engine.begin.return_value.__aenter__ = AsyncMock(return_value=mock_conn)
         mock_engine.begin.return_value.__aexit__ = AsyncMock(return_value=None)
         mock_ge.return_value = mock_engine
-        r = await async_client.post(f"/api/projects/{pid}/members", json={"user_id": str(owner_id)})
+        r = await async_client.post(f"/docupipe/api/projects/{pid}/members", json={"user_id": str(owner_id)})
         assert r.status_code == 400
     clear_overrides()
 
@@ -128,7 +134,7 @@ async def test_remove_member_ok(async_client):
         mock_engine.begin.return_value.__aenter__ = AsyncMock(return_value=mock_conn)
         mock_engine.begin.return_value.__aexit__ = AsyncMock(return_value=None)
         mock_ge.return_value = mock_engine
-        r = await async_client.delete(f"/api/projects/{pid}/members/{member_id}")
+        r = await async_client.delete(f"/docupipe/api/projects/{pid}/members/{member_id}")
         assert r.status_code == 200
         assert r.json()["status"] == "removed"
     clear_overrides()
@@ -147,6 +153,6 @@ async def test_remove_member_owner(async_client):
         mock_engine.begin.return_value.__aenter__ = AsyncMock(return_value=mock_conn)
         mock_engine.begin.return_value.__aexit__ = AsyncMock(return_value=None)
         mock_ge.return_value = mock_engine
-        r = await async_client.delete(f"/api/projects/{pid}/members/{owner_id}")
+        r = await async_client.delete(f"/docupipe/api/projects/{pid}/members/{owner_id}")
         assert r.status_code == 400
     clear_overrides()

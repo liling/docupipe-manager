@@ -69,6 +69,9 @@ class XinyiPlatformClient:
     async def revoke_token(self, raw_token: str) -> None:
         await self._post_json("/oauth/revoke", {"token": raw_token}, with_client_auth=False)
 
+    async def revoke_user_session(self, refresh_token: str) -> None:
+        await self._post_json("/internal/auth/revoke", {"refresh_token": refresh_token})
+
     async def batch_get_users(self, user_ids: list[uuid.UUID]) -> dict[uuid.UUID, dict | None]:
         if not user_ids:
             return {}
@@ -82,6 +85,14 @@ class XinyiPlatformClient:
             v = raw.get(str(uid))
             out[uid] = v
         return out
+
+    async def search_users(self, query: str) -> list[dict]:
+        if not query.strip():
+            return []
+        result = await self._get_json(f"/internal/users/search?q={query}")
+        if result is None:
+            return []
+        return result.get("users", [])
 
     async def push_audit(self, event: dict) -> None:
         try:

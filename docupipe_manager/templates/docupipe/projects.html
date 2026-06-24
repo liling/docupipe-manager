@@ -15,7 +15,7 @@
 </div>
 <script>
 async function loadProjects() {
-  const r = await fetch("/api/projects");
+  const r = await fetch(`${API_PREFIX}/api/projects`);
   const projects = await r.json();
   const box = document.getElementById("project-list");
   if (!projects.length) {
