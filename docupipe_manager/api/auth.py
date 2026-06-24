@@ -4,7 +4,7 @@ from typing import Optional
 from fastapi import APIRouter, Cookie, Depends, HTTPException, Request, Response
 from fastapi.responses import RedirectResponse
 
-from docupipe_manager.auth.dependencies import SESSION_COOKIE, get_current_user_or_none
+from docupipe_manager.auth.dependencies import SESSION_COOKIE
 from docupipe_manager.auth.oauth_state import generate_state, verify_state
 from docupipe_manager.config import Settings
 

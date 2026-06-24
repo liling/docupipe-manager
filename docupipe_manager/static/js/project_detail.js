@@ -8,7 +8,7 @@ function statusTagClass(status) {
 }
 
 async function loadProject() {
-  const r = await fetch(`/api/projects/${pid}`);
+  const r = await fetch(`${API_PREFIX}/api/projects/${pid}`);
   if (!r.ok) { location.href = "/docupipe/projects"; return; }
   const p = await r.json();
   document.getElementById("proj-name").textContent = p.name;
@@ -18,7 +18,7 @@ async function loadProject() {
 }
 
 async function loadTasks() {
-  const r = await fetch(`/api/projects/${pid}/tasks`);
+  const r = await fetch(`${API_PREFIX}/api/projects/${pid}/tasks`);
   const tasks = await r.json();
   const box = document.getElementById("tab-tasks");
   if (!tasks.length) {
@@ -40,7 +40,7 @@ async function loadTasks() {
       </td>
     </tr>`).join("") + `</tbody></table>`;
   box.querySelectorAll(".trigger").forEach(b => b.addEventListener("click", async () => {
-    const r = await fetch(`/api/projects/${pid}/tasks/${b.dataset.id}/trigger`, {method: "POST", headers: {"Content-Type": "application/json"}, body: "{}"});
+    const r = await fetch(`${API_PREFIX}/api/projects/${pid}/tasks/${b.dataset.id}/trigger`, {method: "POST", headers: {"Content-Type": "application/json"}, body: "{}"});
     if (r.ok) {
       const data = await r.json();
       location.href = `/docupipe/runs/${data.run_id}`;
@@ -51,7 +51,7 @@ async function loadTasks() {
 }
 
 async function loadCredentials() {
-  const r = await fetch(`/api/projects/${pid}/credentials`);
+  const r = await fetch(`${API_PREFIX}/api/projects/${pid}/credentials`);
   const creds = await r.json();
   const box = document.getElementById("tab-credentials");
 
@@ -84,13 +84,13 @@ async function loadCredentials() {
   document.getElementById("cred-add").addEventListener("click", () => showCredentialDialog());
   box.querySelectorAll(".revoke-cred").forEach(b => b.addEventListener("click", async () => {
     if (!confirm("确认吊销此凭证？")) return;
-    const rr = await fetch(`/api/projects/${pid}/credentials/${b.dataset.id}`, {method: "DELETE"});
+    const rr = await fetch(`${API_PREFIX}/api/projects/${pid}/credentials/${b.dataset.id}`, {method: "DELETE"});
     if (rr.ok) { loadCredentials(); } else { alert("吊销失败"); }
   }));
   box.querySelectorAll(".test-cred").forEach(b => b.addEventListener("click", async (e) => {
     const btn = e.currentTarget;
     const old = btn.textContent; btn.textContent = "测试中..."; btn.disabled = true;
-    const tr = await fetch(`/api/projects/${pid}/credentials/${b.dataset.id}/test`, {method: "POST"});
+    const tr = await fetch(`${API_PREFIX}/api/projects/${pid}/credentials/${b.dataset.id}/test`, {method: "POST"});
     if (!tr.ok) { alert("请求失败"); btn.textContent = old; btn.disabled = false; loadCredentials(); return; }
     const data = await tr.json();
     btn.textContent = old; btn.disabled = false;
@@ -174,7 +174,7 @@ function showCredentialDialog() {
     if (!name) { alert("请输入凭证名称"); return; }
     if (!auth_blob) { alert("请粘贴或上传凭证内容"); return; }
     saveBtn.disabled = true;
-    const rr = await fetch(`/api/projects/${pid}/credentials/import`, {
+    const rr = await fetch(`${API_PREFIX}/api/projects/${pid}/credentials/import`, {
       method: "POST", headers: {"Content-Type": "application/json"},
       body: JSON.stringify({name, auth_blob}),
     });
@@ -186,7 +186,7 @@ function showCredentialDialog() {
 function startDeviceFlow(area, dialog) {
   let sessionKey = null;
   area.innerHTML = '<p class="card-row-meta">启动设备登录...</p>';
-  fetch(`/api/projects/${pid}/credentials/device-login/start?name=${encodeURIComponent(dialog.querySelector("#cred-name").value || "dws-cred")}`, {method: "POST"})
+  fetch(`${API_PREFIX}/api/projects/${pid}/credentials/device-login/start?name=${encodeURIComponent(dialog.querySelector("#cred-name").value || "dws-cred")}`, {method: "POST"})
     .then(r => r.ok ? r.json() : Promise.reject())
     .then(data => {
       sessionKey = data.session_key;
@@ -199,11 +199,11 @@ function startDeviceFlow(area, dialog) {
         </div>`;
       area.querySelector("#df-poll").addEventListener("click", async () => {
         area.innerHTML = '<p class="card-row-meta">验证中...</p>';
-        const pr = await fetch(`/api/projects/${pid}/credentials/device-login/poll?session_key=${sessionKey}`);
+        const pr = await fetch(`${API_PREFIX}/api/projects/${pid}/credentials/device-login/poll?session_key=${sessionKey}`);
         if (!pr.ok) { area.innerHTML = '<p class="status-tag is-failed">验证失败或已过期</p>'; return; }
         const pd = await pr.json();
         if (pd.status === "success" || pd.status === "authorized") {
-          const fr = await fetch(`/api/projects/${pid}/credentials/device-login/finalize`, {
+          const fr = await fetch(`${API_PREFIX}/api/projects/${pid}/credentials/device-login/finalize`, {
             method: "POST", headers: {"Content-Type": "application/json"},
             body: JSON.stringify({session_key: sessionKey, name: dialog.querySelector("#cred-name").value || "dws-cred"}),
           });
@@ -229,36 +229,33 @@ function userSubtitle(user) {
 }
 
 async function loadMembers() {
-  const r = await fetch(`/api/projects/${pid}`);
+  const r = await fetch(`${API_PREFIX}/api/projects/${pid}`);
   const project = await r.json();
   const isOwner = project.is_owner;
 
-  const mr = await fetch(`/api/projects/${pid}/members`);
+  const mr = await fetch(`${API_PREFIX}/api/projects/${pid}/members`);
   const data = await mr.json();
   const box = document.getElementById("tab-members");
 
   let html = `<div class="stack">`;
-  html += `<div class="card-row">
-    <div class="card-row-main">
-      <span class="card-row-title">${displayName(data.owner)}</span>
-      <span class="card-row-meta">${userSubtitle(data.owner)}</span>
-    </div>
-    <span class="status-tag is-success">所有者</span>
-  </div>`;
-
-  if (data.members.length) {
+  if (data.members && data.members.length) {
     for (const m of data.members) {
+      const isMemberOwner = m.role === "owner";
       html += `<div class="card-row">
         <div class="card-row-main">
           <span class="card-row-title">${displayName(m)}</span>
           <span class="card-row-meta">${userSubtitle(m)}</span>
         </div>
-        <div class="card-row-actions">
+        <div class="card-row-actions" style="display:flex;align-items:center;gap:8px">
+          ${isMemberOwner ? `<span class="status-tag is-success">所有者</span>` : ""}
           <span class="card-row-meta-inline">${m.created_at}</span>
-          ${isOwner ? `<button class="btn btn-sm btn-danger remove-member" data-id="${m.user_id}">移除</button>` : ""}
+          ${isOwner && !isMemberOwner ? `<button class="btn btn-sm btn-danger remove-member" data-id="${m.user_id}">移除</button>` : ""}
         </div>
       </div>`;
     }
+  }
+  if (!data.members || !data.members.length) {
+    html += '<div class="empty-state">暂无成员。</div>';
   }
   html += `</div>`;
 
@@ -281,7 +278,7 @@ async function loadMembers() {
       const q = input.value.trim();
       if (q.length < 1) { resultsEl.style.display = "none"; return; }
       searchTimer = setTimeout(async () => {
-        const rr = await fetch(`/api/users/search?q=${encodeURIComponent(q)}`);
+        const rr = await fetch(`${API_PREFIX}/api/users/search?q=${encodeURIComponent(q)}`);
         if (!rr.ok) return;
         const users = await rr.json();
         if (!users.length) {
@@ -305,7 +302,7 @@ async function loadMembers() {
           btn.addEventListener("click", async (e) => {
             e.stopPropagation();
             const userId = btn.dataset.id;
-            const rr = await fetch(`/api/projects/${pid}/members`, {
+            const rr = await fetch(`${API_PREFIX}/api/projects/${pid}/members`, {
               method: "POST",
               headers: {"Content-Type": "application/json"},
               body: JSON.stringify({user_id: userId}),
@@ -331,7 +328,7 @@ async function loadMembers() {
 
     box.querySelectorAll(".remove-member").forEach(b => b.addEventListener("click", async () => {
       if (!confirm("确认移除该成员？")) return;
-      const r = await fetch(`/api/projects/${pid}/members/${b.dataset.id}`, {method: "DELETE"});
+      const r = await fetch(`${API_PREFIX}/api/projects/${pid}/members/${b.dataset.id}`, {method: "DELETE"});
       if (r.ok) { loadMembers(); } else { alert("移除失败"); }
     }));
   }
@@ -342,7 +339,7 @@ let _runsPage = {page: 1};
 async function loadRuns() {
   const box = document.getElementById("tab-runs");
   const pp = _runsPage.page;
-  const r = await fetch(`/api/runs?project_id=${pid}&page=${pp}&page_size=20`);
+  const r = await fetch(`${API_PREFIX}/api/runs?project_id=${pid}&page=${pp}&page_size=20`);
   if (!r.ok) { box.innerHTML = '<div class="empty-state">加载失败</div>'; return; }
   const data = await r.json();
 
@@ -389,7 +386,7 @@ async function loadEnvVars() {
 }
 
 async function refreshEnvList() {
-  const r = await fetch(`/api/projects/${pid}/env-vars`);
+  const r = await fetch(`${API_PREFIX}/api/projects/${pid}/env-vars`);
   const vars = await r.json();
   const list = document.getElementById("env-list");
   if (!vars.length) {
@@ -416,7 +413,7 @@ async function refreshEnvList() {
   list.querySelectorAll(".env-edit").forEach(b => b.addEventListener("click", () => showEnvEditor(b.dataset.id)));
   list.querySelectorAll(".env-del").forEach(b => b.addEventListener("click", async () => {
     if (!confirm("确认删除该环境变量？")) return;
-    const dr = await fetch(`/api/projects/${pid}/env-vars/${b.dataset.id}`, {method: "DELETE"});
+    const dr = await fetch(`${API_PREFIX}/api/projects/${pid}/env-vars/${b.dataset.id}`, {method: "DELETE"});
     if (dr.ok) { refreshEnvList(); } else { alert("删除失败"); }
   }));
 }
@@ -430,7 +427,7 @@ async function showEnvEditor(varId) {
   }
   let v = null;
   if (varId) {
-    const r = await fetch(`/api/projects/${pid}/env-vars`);
+    const r = await fetch(`${API_PREFIX}/api/projects/${pid}/env-vars`);
     const all = await r.json();
     v = all.find(x => x.id === varId);
   }
@@ -476,11 +473,11 @@ async function showEnvEditor(varId) {
       } else if (valField) {
         upd.value = valField;
       }
-      r = await fetch(`/api/projects/${pid}/env-vars/${varId}`, {
+      r = await fetch(`${API_PREFIX}/api/projects/${pid}/env-vars/${varId}`, {
         method: "PUT", headers: {"Content-Type": "application/json"}, body: JSON.stringify(upd),
       });
     } else {
-      r = await fetch(`/api/projects/${pid}/env-vars`, {
+      r = await fetch(`${API_PREFIX}/api/projects/${pid}/env-vars`, {
         method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(body),
       });
     }
@@ -527,7 +524,7 @@ function showRenameDialog(id, oldName) {
   d.querySelector("#rename-save").onclick = async () => {
     const name = d.querySelector("#rename-input").value.trim();
     if (!name) { alert("名称不能为空"); return; }
-    const r = await fetch(`/api/projects/${pid}/credentials/${id}`, {
+    const r = await fetch(`${API_PREFIX}/api/projects/${pid}/credentials/${id}`, {
       method: "PUT", headers: {"Content-Type": "application/json"},
       body: JSON.stringify({name}),
     });

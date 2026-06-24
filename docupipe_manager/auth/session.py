@@ -1,5 +1,5 @@
 """JWT decode for xinyi-platform-issued access tokens."""
-from jose import JWTError, jwt
+from jose import jwt
 
 
 SELF_AUDIENCE = "docupipe-prod"

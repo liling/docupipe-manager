@@ -31,11 +31,8 @@ async def _verify_run_access(run_id: uuid.UUID, user: dict):
             row = await conn.execute(text("""
                 SELECT 1 FROM docupipe_manager.tasks t
                 JOIN docupipe_manager.projects p ON p.id = t.project_id
-                WHERE t.id = :tid AND (
-                    p.owner_id = :uid
-                    OR p.id IN (
-                        SELECT pm.project_id FROM docupipe_manager.project_members pm WHERE pm.user_id = :uid
-                    )
+                WHERE t.id = :tid AND p.id IN (
+                    SELECT pm.project_id FROM docupipe_manager.project_members pm WHERE pm.user_id = :uid
                 )
             """), {"tid": str(run.task_id), "uid": user["id"]})
             if not row.fetchone():
@@ -79,9 +76,9 @@ async def list_runs(
                 r[0] for r in (await conn.execute(text("""
                     SELECT t.id FROM docupipe_manager.tasks t
                     WHERE t.project_id IN (
-                        SELECT id FROM docupipe_manager.projects WHERE owner_id = :uid AND status != 'archived'
-                        UNION
-                        SELECT pm.project_id FROM docupipe_manager.project_members pm WHERE pm.user_id = :uid
+                        SELECT pm.project_id FROM docupipe_manager.project_members pm
+                        JOIN docupipe_manager.projects p ON p.id = pm.project_id
+                        WHERE pm.user_id = :uid AND p.status != 'archived'
                     )
                 """), {"uid": user["id"]})).fetchall()
             ]

@@ -2,12 +2,10 @@ import asyncio
 import logging
 import os
 import shlex
-import shutil
 import signal
 import uuid
 from collections import deque
 from datetime import datetime, timezone
-from tempfile import mkdtemp
 import tempfile
 
 from sqlalchemy import select, update

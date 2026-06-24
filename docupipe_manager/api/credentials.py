@@ -1,12 +1,10 @@
 import uuid
-from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy.exc import IntegrityError
 
 from docupipe_manager.api.projects import _require_access_async
-from docupipe_manager.models.dws_credential import CredentialStatus
 
 router = APIRouter(prefix="/api/projects/{project_id}/credentials", tags=["credentials"])
 
@@ -50,7 +48,7 @@ async def import_credential(project_id: uuid.UUID, body: ImportRequest,
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
-    except IntegrityError as e:
+    except IntegrityError:
         raise HTTPException(status_code=409, detail=f"凭证名「{body.name}」已存在")
     return {"id": str(cred.id), "status": "active"}
 

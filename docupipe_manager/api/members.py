@@ -4,24 +4,26 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
 from docupipe_manager.api.projects import _require_access_async, _require_owner_async, _get_engine
-from docupipe_manager.models.project_member import ProjectMember
+from docupipe_manager.models.project_member import MemberRole, ProjectMember
 
 router = APIRouter(prefix="/api/projects/{project_id}/members", tags=["members"])
 
 
 class AddMemberRequest(BaseModel):
     user_id: str
-    username: str | None = None
+
+
+class UpdateRoleRequest(BaseModel):
+    role: MemberRole
 
 
 def _resolve_user(info: dict | None) -> dict:
     if info is None:
-        return {"username": "", "display_name": "", "email": "", "role": ""}
+        return {"username": "", "display_name": "", "email": ""}
     return {
         "username": info.get("username", "") or "",
         "display_name": info.get("display_name", "") or "",
         "email": info.get("email", "") or "",
-        "role": info.get("role", "") or "",
     }
 
 
@@ -45,10 +47,10 @@ async def _fetch_users(user_ids: list[str]) -> dict[str, dict]:
                     cache.set(uid, info)
                     result[str(uid)] = info
                 else:
-                    result[str(uid)] = {"username": "", "display_name": "", "email": "", "role": ""}
+                    result[str(uid)] = {"username": "", "display_name": "", "email": ""}
         except Exception:
             for uid in miss_ids:
-                result.setdefault(str(uid), {"username": "", "display_name": "", "email": "", "role": ""})
+                result.setdefault(str(uid), {"username": "", "display_name": "", "email": ""})
     return result
 
 
@@ -57,26 +59,18 @@ async def list_members(project_id: uuid.UUID, user: dict = Depends(_require_acce
     from sqlalchemy import text
     engine = _get_engine()
     async with engine.begin() as conn:
-        owner = (await conn.execute(
-            text("SELECT owner_id FROM docupipe_manager.projects WHERE id = :pid"),
-            {"pid": str(project_id)},
-        )).fetchone()
         members = (await conn.execute(text("""
-            SELECT user_id, added_by, created_at FROM docupipe_manager.project_members
+            SELECT user_id, role, created_at FROM docupipe_manager.project_members
             WHERE project_id = :pid ORDER BY created_at
         """), {"pid": str(project_id)})).fetchall()
-    all_ids = {str(owner.owner_id)} | {str(m.user_id) for m in members}
-    users = await _fetch_users(list(all_ids))
-    owner_info = users.get(str(owner.owner_id), {})
+    user_ids = [str(m.user_id) for m in members]
+    users = await _fetch_users(user_ids)
     return {
-        "owner": {
-            "user_id": str(owner.owner_id), "is_owner": True,
-            **_resolve_user(owner_info),
-        },
         "members": [
             {
                 "user_id": str(m.user_id),
-                "added_by": str(m.added_by), "created_at": str(m.created_at),
+                "role": m.role,
+                "created_at": str(m.created_at),
                 **_resolve_user(users.get(str(m.user_id))),
             }
             for m in members
@@ -87,15 +81,9 @@ async def list_members(project_id: uuid.UUID, user: dict = Depends(_require_acce
 @router.post("")
 async def add_member(project_id: uuid.UUID, body: AddMemberRequest,
                      user: dict = Depends(_require_owner_async)):
-    from sqlalchemy import insert, select, text
+    from sqlalchemy import insert, select
     engine = _get_engine()
     async with engine.begin() as conn:
-        owner = (await conn.execute(
-            text("SELECT owner_id FROM docupipe_manager.projects WHERE id = :pid"),
-            {"pid": str(project_id)},
-        )).fetchone()
-        if str(owner.owner_id) == body.user_id:
-            raise HTTPException(status_code=400, detail="Owner is already in project")
         existing = (await conn.execute(
             select(ProjectMember).where(
                 ProjectMember.project_id == project_id,
@@ -108,7 +96,7 @@ async def add_member(project_id: uuid.UUID, body: AddMemberRequest,
             insert(ProjectMember).values(
                 project_id=project_id,
                 user_id=uuid.UUID(body.user_id),
-                added_by=uuid.UUID(user["id"]),
+                role=MemberRole.MEMBER,
             )
         )
     return {"status": "added", "user_id": body.user_id}
@@ -131,15 +119,17 @@ async def search_platform_users(q: str = ""):
 @router.delete("/{user_id}")
 async def remove_member(project_id: uuid.UUID, user_id: uuid.UUID,
                         user: dict = Depends(_require_owner_async)):
-    from sqlalchemy import delete, text
+    from sqlalchemy import delete, select
     engine = _get_engine()
     async with engine.begin() as conn:
-        owner = (await conn.execute(
-            text("SELECT owner_id FROM docupipe_manager.projects WHERE id = :pid"),
-            {"pid": str(project_id)},
+        existing = (await conn.execute(
+            select(ProjectMember).where(
+                ProjectMember.project_id == project_id,
+                ProjectMember.user_id == user_id,
+            )
         )).fetchone()
-        if str(owner.owner_id) == str(user_id):
-            raise HTTPException(status_code=400, detail="Cannot remove owner")
+        if not existing:
+            raise HTTPException(status_code=404, detail="Member not found")
         await conn.execute(
             delete(ProjectMember).where(
                 ProjectMember.project_id == project_id,
@@ -147,3 +137,29 @@ async def remove_member(project_id: uuid.UUID, user_id: uuid.UUID,
             )
         )
     return {"status": "removed"}
+
+
+@router.patch("/{user_id}")
+async def update_member_role(project_id: uuid.UUID, user_id: uuid.UUID,
+                             body: UpdateRoleRequest,
+                             user: dict = Depends(_require_owner_async)):
+    from sqlalchemy import select
+    engine = _get_engine()
+    async with engine.begin() as conn:
+        existing = (await conn.execute(
+            select(ProjectMember).where(
+                ProjectMember.project_id == project_id,
+                ProjectMember.user_id == user_id,
+            )
+        )).fetchone()
+        if not existing:
+            raise HTTPException(status_code=404, detail="Member not found")
+        await conn.execute(
+            ProjectMember.__table__.update()
+            .where(
+                ProjectMember.project_id == project_id,
+                ProjectMember.user_id == user_id,
+            )
+            .values(role=body.role)
+        )
+    return {"status": "updated", "role": body.role.value}
