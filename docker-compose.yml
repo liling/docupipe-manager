@@ -6,7 +6,6 @@ services:
     env_file: .env
     volumes:
       - ./data:/var/lib/docupipe-manager
-      - /tmp:/tmp
     networks:
       - default
       - hindsight_default

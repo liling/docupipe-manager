@@ -27,7 +27,7 @@
       e.preventDefault();
       const f = new FormData(e.target);
       const body = Object.fromEntries(f.entries());
-      const r = await fetch("/admin/api/projects", {
+      const r = await fetch(`${API_PREFIX}/admin/api/projects`, {
         method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(body),
       });
       if (r.ok) { const j = await r.json(); location.href = `/docupipe/projects/${j.id}`; }
@@ -53,7 +53,7 @@
   <div id="tab-credentials" class="tab-panel hidden"></div>
   <div id="tab-members" class="tab-panel hidden"></div>
   <div id="tab-runs" class="tab-panel hidden"></div>
-  <script src="/static/js/project_detail.js"></script>
+  <script src="/docupipe/static/js/project_detail.js"></script>
   {% endif %}
 </div>
 <script>
