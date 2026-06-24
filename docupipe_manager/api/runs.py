@@ -47,6 +47,7 @@ async def _verify_run_access(run_id: uuid.UUID, user: dict):
 @router.get("")
 async def list_runs(
     task_id: Optional[uuid.UUID] = None,
+    project_id: Optional[uuid.UUID] = None,
     status: Optional[str] = None,
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
@@ -54,12 +55,19 @@ async def list_runs(
 ):
     from sqlalchemy import func, select, text
     from docupipe_manager.models.pipeline_run import PipelineRun
+    from docupipe_manager.models.task import Task
 
     engine = _get_engine()
 
     conditions = []
     if task_id:
         conditions.append(PipelineRun.task_id == task_id)
+    if project_id:
+        conditions.append(
+            PipelineRun.task_id.in_(
+                select(Task.id).where(Task.project_id == project_id)
+            )
+        )
     if status:
         conditions.append(PipelineRun.status == status)
 
@@ -86,7 +94,9 @@ async def list_runs(
             count_q = count_q.where(*conditions)
         total = (await conn.execute(count_q)).scalar() or 0
 
-        q = select(PipelineRun).order_by(PipelineRun.created_at.desc())
+        q = select(PipelineRun, Task.name.label("task_name")).join(
+            Task, PipelineRun.task_id == Task.id, isouter=not bool(project_id)
+        ).order_by(PipelineRun.created_at.desc())
         if conditions:
             q = q.where(*conditions)
         q = q.offset(offset).limit(page_size)
@@ -98,15 +108,16 @@ async def list_runs(
         "page_size": page_size,
         "runs": [
             {
-                "id": str(r.id),
-                "task_id": str(r.task_id),
-                "trigger_type": r.trigger_type.value if hasattr(r.trigger_type, "value") else r.trigger_type,
-                "pipeline_name": r.pipeline_name,
-                "mode": r.mode,
-                "status": r.status.value if hasattr(r.status, "value") else r.status,
-                "started_at": str(r.started_at) if r.started_at else None,
-                "completed_at": str(r.completed_at) if r.completed_at else None,
-                "created_at": str(r.created_at),
+                "id": str(r.PipelineRun.id),
+                "task_id": str(r.PipelineRun.task_id),
+                "task_name": r.task_name,
+                "trigger_type": r.PipelineRun.trigger_type.value if hasattr(r.PipelineRun.trigger_type, "value") else r.PipelineRun.trigger_type,
+                "pipeline_name": r.PipelineRun.pipeline_name,
+                "mode": r.PipelineRun.mode,
+                "status": r.PipelineRun.status.value if hasattr(r.PipelineRun.status, "value") else r.PipelineRun.status,
+                "started_at": str(r.PipelineRun.started_at) if r.PipelineRun.started_at else None,
+                "completed_at": str(r.PipelineRun.completed_at) if r.PipelineRun.completed_at else None,
+                "created_at": str(r.PipelineRun.created_at),
             }
             for r in rows
         ],

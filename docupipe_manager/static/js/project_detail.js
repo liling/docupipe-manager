@@ -274,46 +274,45 @@ async function loadMembers() {
   }
 }
 
+let _runsPage = {page: 1};
+
 async function loadRuns() {
   const box = document.getElementById("tab-runs");
+  const pp = _runsPage.page;
+  const r = await fetch(`/api/runs?project_id=${pid}&page=${pp}&page_size=20`);
+  if (!r.ok) { box.innerHTML = '<div class="empty-state">加载失败</div>'; return; }
+  const data = await r.json();
 
-  const tasksRes = await fetch(`/api/projects/${pid}/tasks`);
-  const tasks = await tasksRes.json();
-  if (!tasks.length) {
+  if (!data.total) {
     box.innerHTML = '<div class="empty-state">暂无运行记录。</div>';
+    _runsPage = {page: 1};
     return;
   }
 
-  const allRuns = [];
-  for (const t of tasks.slice(0, 10)) {
-    const r = await fetch(`/api/runs?task_id=${t.id}&page_size=5`);
-    if (!r.ok) continue;
-    const data = await r.json();
-    for (const run of data.runs) {
-      allRuns.push({...run, task_name: t.name});
-    }
+  let html = `<p class="text-muted" style="margin:0 0 8px">共 ${data.total} 条记录</p>`;
+  html += '<table class="data-table"><thead><tr><th>任务</th><th>流水线</th><th>模式</th><th>状态</th><th>开始时间</th></tr></thead><tbody>';
+  for (const run of data.runs) {
+    html += `<tr>
+      <td><a href="/docupipe/projects/${pid}/tasks/${run.task_id}/edit" style="text-decoration:none">${run.task_name || run.task_id.slice(0,8)}</a></td>
+      <td>${run.pipeline_name || "default"}</td>
+      <td>${run.mode}</td>
+      <td><span class="status-tag ${statusTagClass(run.status)}">${run.status}</span></td>
+      <td>${run.started_at ? new Date(run.started_at).toLocaleString() : "—"}</td>
+    </tr>`;
   }
+  html += '</tbody></table>';
 
-  if (!allRuns.length) {
-    box.innerHTML = '<div class="empty-state">暂无运行记录。</div>';
-    return;
-  }
+  const totalPages = Math.ceil(data.total / data.page_size);
+  html += '<div class="form-actions" style="margin-top:8px">';
+  if (pp > 1) html += `<button class="btn btn-sm btn-secondary" id="runs-prev">上一页</button> `;
+  html += `<span class="card-row-meta-inline">第 ${pp}/${totalPages} 页</span>`;
+  if (pp < totalPages) html += ` <button class="btn btn-sm btn-secondary" id="runs-next">下一页</button>`;
+  html += '</div>';
 
-  allRuns.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+  box.innerHTML = html;
 
-  box.innerHTML = '<div class="stack">' +
-    allRuns.slice(0, 50).map(run => `
-      <a class="card-row" href="/docupipe/runs/${run.id}">
-        <div class="card-row-main">
-          <span class="card-row-title">${run.task_name}</span>
-          <span class="card-row-meta-inline">${run.pipeline_name || "default"} · ${run.mode}</span>
-        </div>
-        <div class="card-row-actions">
-          <span class="status-tag ${statusTagClass(run.status)}">${run.status}</span>
-          <span class="card-row-meta-inline">${run.started_at ? new Date(run.started_at).toLocaleString() : ""}</span>
-        </div>
-      </a>`).join("") +
-    '</div>';
+  box.querySelector("#runs-prev")?.addEventListener("click", () => { _runsPage.page--; loadRuns(); });
+  box.querySelector("#runs-next")?.addEventListener("click", () => { _runsPage.page++; loadRuns(); });
 }
 
 async function loadEnvVars() {
