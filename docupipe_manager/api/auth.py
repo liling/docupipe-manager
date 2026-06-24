@@ -155,11 +155,12 @@ async def auth_logout(
     client = app.state.platform_client
 
     if docupipe_refresh:
-        await client.revoke_token(docupipe_refresh)
+        await client.revoke_user_session(docupipe_refresh)
 
-    redirect = RedirectResponse(url="/auth/login-redirect", status_code=302)
-    redirect.delete_cookie(key=SESSION_COOKIE)
-    redirect.delete_cookie(key=REFRESH_COOKIE)
+    platform_logout_url = f"{settings.platform_url}/logout?return_to={settings.base_url}"
+    redirect = RedirectResponse(url=platform_logout_url, status_code=303)
+    redirect.delete_cookie(key=SESSION_COOKIE, path="/")
+    redirect.delete_cookie(key=REFRESH_COOKIE, path="/")
     return redirect
 
 

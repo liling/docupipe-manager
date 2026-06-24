@@ -100,8 +100,10 @@ async def test_logout_clears_cookies(async_client):
             "docupipe_refresh": "test-refresh",
         },
     )
-    assert resp.status_code == 302
-    assert resp.headers.get("location", "").startswith("/auth/login-redirect")
+    assert resp.status_code == 303
+    location = resp.headers.get("location", "")
+    assert "logout" in location
+    assert "platform" in location
     set_cookie = resp.headers.get("set-cookie", "")
     assert "docupipe_session=" in set_cookie or "Max-Age=0" in set_cookie
 
