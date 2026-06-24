@@ -1,4 +1,5 @@
 const pid = document.querySelector("[data-project-id]").dataset.projectId;
+const currentUserId = document.querySelector("[data-current-user-id]").dataset.currentUserId;
 
 function statusTagClass(status) {
   if (status === "succeeded" || status === "active" || status === "success") return "is-success";
@@ -228,6 +229,8 @@ function userSubtitle(user) {
   return parts.join(" · ");
 }
 
+let _membersCache = [];
+
 async function loadMembers() {
   const r = await fetch(`${API_PREFIX}/api/projects/${pid}`);
   const project = await r.json();
@@ -236,101 +239,183 @@ async function loadMembers() {
   const mr = await fetch(`${API_PREFIX}/api/projects/${pid}/members`);
   const data = await mr.json();
   const box = document.getElementById("tab-members");
+  _membersCache = data.members || [];
 
-  let html = `<div class="stack">`;
-  if (data.members && data.members.length) {
-    for (const m of data.members) {
-      const isMemberOwner = m.role === "owner";
-      html += `<div class="card-row">
-        <div class="card-row-main">
-          <span class="card-row-title">${displayName(m)}</span>
-          <span class="card-row-meta">${userSubtitle(m)}</span>
-        </div>
-        <div class="card-row-actions" style="display:flex;align-items:center;gap:8px">
-          ${isMemberOwner ? `<span class="status-tag is-success">所有者</span>` : ""}
-          <span class="card-row-meta-inline">${m.created_at}</span>
-          ${isOwner && !isMemberOwner ? `<button class="btn btn-sm btn-danger remove-member" data-id="${m.user_id}">移除</button>` : ""}
-        </div>
-      </div>`;
-    }
-  }
-  if (!data.members || !data.members.length) {
+  let html = '<div class="members-header">'
+    + '<h3>成员</h3>'
+    + (isOwner ? '<button class="btn btn-sm btn-primary" onclick="showMemberAddDialog()">+ 添加成员</button>' : '')
+    + '</div>';
+
+  if (!_membersCache.length) {
     html += '<div class="empty-state">暂无成员。</div>';
-  }
-  html += `</div>`;
+  } else {
+    const ownerCount = _membersCache.filter(m => m.role === "owner").length;
+    html += '<table class="data-table"><thead><tr><th>名称</th><th>角色</th><th>加入时间</th><th>操作</th></tr></thead><tbody>';
+    for (const m of _membersCache) {
+      const isMemberOwner = m.role === "owner";
+      const isSelf = m.user_id === currentUserId;
+      const selfLastOwner = isSelf && isMemberOwner && ownerCount <= 1;
+      const badge = isMemberOwner
+        ? '<span class="role-badge role-owner">owner</span>'
+        : '<span class="role-badge">member</span>';
 
-  if (isOwner) {
-    html += `<div class="member-lookup-row" style="margin-top:16px">
-      <input id="member-search-input" placeholder="搜索用户名、姓名、邮箱..." class="form-control" autocomplete="off">
-      <div id="member-search-results" class="search-results-dropdown" style="display:none;position:absolute;background:#fff;border:1px solid #ddd;border-radius:6px;width:100%;max-height:240px;overflow-y:auto;z-index:100;margin-top:2px;box-shadow:0 4px 12px rgba(0,0,0,.1)"></div>
-    </div>`;
+      let roleCell = badge;
+      let actionCell = '';
+      if (isOwner) {
+        const selectDisabled = selfLastOwner ? 'disabled' : '';
+        roleCell = `<select class="role-select" onchange="changeMemberRole('${m.user_id}',this.value)" ${selectDisabled}>
+          <option value="member" ${m.role === 'member' ? 'selected' : ''}>member</option>
+          <option value="owner" ${m.role === 'owner' ? 'selected' : ''}>owner</option>
+        </select>`;
+        if (selfLastOwner) roleCell += '<br><span class="member-hint">至少保留一位 owner</span>';
+        if (!isSelf) {
+          actionCell += `<button class="btn btn-sm btn-danger remove-member" data-id="${m.user_id}">移除</button>`;
+        }
+      }
+
+      html += '<tr>'
+        + `<td><span class="card-row-title">${displayName(m)}</span><br><span class="card-row-meta">${userSubtitle(m)}</span></td>`
+        + `<td>${roleCell}</td>`
+        + `<td class="card-row-meta">${m.created_at}</td>`
+        + `<td class="action-cell">${actionCell}</td>`
+        + '</tr>';
+    }
+    html += '</tbody></table>';
   }
 
   box.innerHTML = html;
 
-  if (isOwner) {
-    let searchTimer = null;
-    const input = document.getElementById("member-search-input");
-    const resultsEl = document.getElementById("member-search-results");
+  box.querySelectorAll(".remove-member").forEach(b => b.addEventListener("click", async () => {
+    if (!confirm("确认移除该成员？")) return;
+    const r = await fetch(`${API_PREFIX}/api/projects/${pid}/members/${b.dataset.id}`, {method: "DELETE"});
+    if (r.ok) { loadMembers(); } else { alert("移除失败"); }
+  }));
+}
 
-    input.addEventListener("input", () => {
-      clearTimeout(searchTimer);
-      const q = input.value.trim();
-      if (q.length < 1) { resultsEl.style.display = "none"; return; }
-      searchTimer = setTimeout(async () => {
-        const rr = await fetch(`${API_PREFIX}/api/users/search?q=${encodeURIComponent(q)}`);
-        if (!rr.ok) return;
-        const users = await rr.json();
-        if (!users.length) {
-          resultsEl.innerHTML = '<div style="padding:8px 12px;color:#999">未找到用户</div>';
-          resultsEl.style.display = "";
-          return;
-        }
-        resultsEl.innerHTML = users.map(u => `
-          <div class="search-result-item" style="padding:8px 12px;cursor:pointer;border-bottom:1px solid #f0f0f0;display:flex;justify-content:space-between;align-items:center"
-               data-id="${u.id}">
-            <div>
-              <div><strong>${displayName(u)}</strong></div>
-              <div class="card-row-meta">@${u.username}${u.email ? " · " + u.email : ""}</div>
-            </div>
-            <button class="btn btn-sm btn-primary add-search-result" data-id="${u.id}" style="flex-shrink:0">添加</button>
-          </div>
-        `).join("");
-        resultsEl.style.display = "";
+async function changeMemberRole(userId, newRole) {
+  const isSelf = userId === currentUserId;
+  const isSelfDowngrade = isSelf && newRole === 'member';
 
-        resultsEl.querySelectorAll(".add-search-result").forEach(btn => {
-          btn.addEventListener("click", async (e) => {
-            e.stopPropagation();
-            const userId = btn.dataset.id;
-            const rr = await fetch(`${API_PREFIX}/api/projects/${pid}/members`, {
-              method: "POST",
-              headers: {"Content-Type": "application/json"},
-              body: JSON.stringify({user_id: userId}),
-            });
-            if (rr.ok) {
-              resultsEl.style.display = "none";
-              input.value = "";
-              loadMembers();
-            } else {
-              alert((await rr.json()).detail || "添加失败");
-            }
-          });
-        });
-      }, 300);
+  if (isSelfDowngrade) {
+    if (!confirm('你将失去管理权限，确定？')) {
+      loadMembers();
+      return;
+    }
+  }
+
+  try {
+    const resp = await fetch(`${API_PREFIX}/api/projects/${pid}/members/${userId}`, {
+      method: 'PATCH',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({role: newRole}),
     });
+    if (!resp.ok) {
+      const data = await resp.json().catch(() => ({}));
+      alert(data.detail || '修改失败');
+      loadMembers();
+      return;
+    }
+    if (isSelfDowngrade) {
+      window.location.reload();
+      return;
+    }
+    loadMembers();
+  } catch (e) {
+    alert('网络错误');
+  }
+}
 
-    input.addEventListener("blur", () => {
-      setTimeout(() => { resultsEl.style.display = "none"; }, 200);
-    });
-    input.addEventListener("focus", () => {
-      if (resultsEl.children.length) resultsEl.style.display = "";
-    });
+// ============ 添加成员弹窗 ============
 
-    box.querySelectorAll(".remove-member").forEach(b => b.addEventListener("click", async () => {
-      if (!confirm("确认移除该成员？")) return;
-      const r = await fetch(`${API_PREFIX}/api/projects/${pid}/members/${b.dataset.id}`, {method: "DELETE"});
-      if (r.ok) { loadMembers(); } else { alert("移除失败"); }
-    }));
+function showMemberAddDialog() {
+  const dialog = document.getElementById("member-add-dialog");
+  document.getElementById("member-lookup-input").value = "";
+  document.getElementById("member-role-select").value = "member";
+  document.getElementById("member-lookup-id").value = "";
+  _resetMemberPreview();
+  dialog.showModal();
+}
+
+function hideMemberAddDialog() {
+  document.getElementById("member-add-dialog").close();
+  loadMembers();
+}
+
+function _resetMemberPreview() {
+  const preview = document.getElementById("member-preview");
+  preview.style.display = "none";
+  preview.innerHTML = "";
+  preview.className = "member-preview";
+  document.getElementById("member-add-submit").disabled = true;
+}
+
+function onMemberLookupInput() {
+  _resetMemberPreview();
+}
+
+async function lookupMember() {
+  const username = document.getElementById("member-lookup-input").value.trim();
+  if (!username) return;
+
+  const preview = document.getElementById("member-preview");
+  preview.style.display = "block";
+  preview.className = "member-preview";
+  preview.innerHTML = '<span class="status-tag">查找中...</span>';
+  document.getElementById("member-add-submit").disabled = true;
+
+  const resp = await fetch(`${API_PREFIX}/api/users/search?q=${encodeURIComponent(username)}`);
+  if (!resp.ok) {
+    preview.className = "member-preview is-error";
+    preview.innerHTML = '<span class="status-tag is-failed">查找失败</span>';
+    return;
+  }
+
+  const users = await resp.json();
+  const user = users.find(u => u.username === username);
+  if (!user) {
+    preview.className = "member-preview is-error";
+    preview.innerHTML = '<span class="status-tag is-failed">用户不存在</span>';
+    return;
+  }
+
+  const isAlreadyMember = _membersCache.some(m => m.user_id === user.id);
+  if (isAlreadyMember) {
+    preview.className = "member-preview is-error";
+    preview.innerHTML = `<div class="member-preview-name">${displayName(user)} <span class="member-preview-username">@${user.username}</span></div>`
+      + '<span class="status-tag is-failed">已是成员</span>';
+    return;
+  }
+
+  preview.className = "member-preview";
+  preview.innerHTML = `<div class="member-preview-name">${displayName(user)} <span class="member-preview-username">@${user.username}</span></div>`
+    + (user.email ? `<div class="member-preview-email">${user.email}</div>` : '')
+    + '<span class="status-tag is-success">可添加</span>';
+  document.getElementById("member-lookup-id").value = user.id;
+  document.getElementById("member-add-submit").disabled = false;
+}
+
+async function confirmAddMember(event) {
+  event.preventDefault();
+  const userId = document.getElementById("member-lookup-id").value;
+  if (!userId) return;
+
+  const submitBtn = document.getElementById("member-add-submit");
+  submitBtn.disabled = true;
+
+  const preview = document.getElementById("member-preview");
+  const resp = await fetch(`${API_PREFIX}/api/projects/${pid}/members`, {
+    method: "POST",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({user_id: userId}),
+  });
+
+  if (resp.ok) {
+    hideMemberAddDialog();
+  } else {
+    const data = await resp.json().catch(() => ({}));
+    preview.className = "member-preview is-error";
+    preview.innerHTML = `<span class="status-tag is-failed">${data.detail || "添加失败"}</span>`;
+    submitBtn.disabled = false;
   }
 }
 
