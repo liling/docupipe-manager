@@ -75,6 +75,42 @@ async def test_probe_auth_blob_import_fails(credential_service):
 
 
 @pytest.mark.asyncio
+async def test_create_from_import_success(credential_service):
+    pid = uuid.uuid4(); uid = uuid.uuid4()
+    meta = {"corp_id": "corp-x", "token_expires_at": "2026-12-31T00:00:00Z",
+            "refresh_token_expires_at": "2027-01-01T00:00:00Z"}
+    captured = {}
+    with patch.object(credential_service, "_probe_auth_blob", AsyncMock(return_value=meta)):
+        with patch.object(credential_service, "_session_factory") as mock_sf:
+            ms = AsyncMock(); ms.__aenter__.return_value = ms
+            ms.add = MagicMock(side_effect=lambda c: captured.__setitem__("cred", c))
+            ms.commit = AsyncMock(); ms.refresh = AsyncMock()
+            mock_sf.return_value = ms
+            await credential_service.create_from_import(pid, "imp", "YWJj", uid)
+
+    cred = captured["cred"]
+    assert cred.corp_id == "corp-x"
+    assert cred.token_expires_at is not None
+    assert cred.refresh_token_expires_at is not None
+    assert cred.credential_type.value == "dws"
+
+
+@pytest.mark.asyncio
+async def test_create_from_import_invalid_blob(credential_service):
+    pid = uuid.uuid4(); uid = uuid.uuid4()
+    added = []
+    with patch.object(credential_service, "_probe_auth_blob",
+                      AsyncMock(side_effect=ValueError("invalid"))):
+        with patch.object(credential_service, "_session_factory") as mock_sf:
+            ms = AsyncMock(); ms.__aenter__.return_value = ms
+            ms.add = AsyncMock(side_effect=lambda c: added.append(c))
+            mock_sf.return_value = ms
+            with pytest.raises(ValueError):
+                await credential_service.create_from_import(pid, "imp", "bad", uid)
+    assert added == []  # 未入库
+
+
+@pytest.mark.asyncio
 async def test_finalize_login_persists_expires(credential_service):
     """finalize 应把 status 返回的过期时间存入 DwsCredential（回归现有写死 None 的 bug）。"""
     pid = uuid.uuid4(); uid = uuid.uuid4()

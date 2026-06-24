@@ -163,6 +163,40 @@ class CredentialService:
 
         return credential
 
+    async def create_from_import(
+        self, project_id: uuid.UUID, name: str, auth_b64: str, user_id: uuid.UUID
+    ) -> DwsCredential:
+        """方式 A：用户粘贴/上传 dws auth export 的 base64，import+status 验证后加密存储。"""
+        meta = await self._probe_auth_blob(auth_b64)
+
+        key_hex = self._settings.encryption_key
+        auth_blob_hex = encrypt_sm4(auth_b64, key_hex)
+
+        credential = DwsCredential(
+            name=name,
+            corp_id=meta.get("corp_id", ""),
+            auth_blob=bytes.fromhex(auth_blob_hex),
+            token_expires_at=_parse_dt(meta.get("token_expires_at")),
+            refresh_token_expires_at=_parse_dt(meta.get("refresh_token_expires_at")),
+            credential_type=CredentialType.dws,
+            status=CredentialStatus.active,
+            created_by=user_id,
+            project_id=project_id,
+        )
+
+        async with self._session_factory() as db_session:
+            db_session.add(credential)
+            await db_session.commit()
+            await db_session.refresh(credential)
+
+        asyncio.create_task(self._platform_client.push_audit({
+            "event": "docupipe.credential.create",
+            "credential_id": str(credential.id),
+            "name": name,
+            "source": "import",
+        }))
+        return credential
+
     async def _probe_auth_blob(self, auth_b64: str) -> dict:
         """把 base64 auth 写入临时 HOME，import 后调 status，返回 status 元数据。
         import 失败抛 ValueError；finally 清理临时目录。"""
