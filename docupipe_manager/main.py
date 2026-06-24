@@ -5,9 +5,11 @@ from concurrent.futures import ThreadPoolExecutor
 
 from alembic import command
 from alembic.config import Config as AlembicConfig
-from fastapi import FastAPI, Request
+from urllib.parse import quote
+
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy import text
 
@@ -106,6 +108,16 @@ async def limit_request_body_size(request: Request, call_next):
     if content_length and int(content_length) > 1_048_576:
         return JSONResponse(status_code=413, content={"detail": "Request body too large (max 1MB)"})
     return await call_next(request)
+
+
+@app.exception_handler(HTTPException)
+async def page_auth_redirect(request: Request, exc: HTTPException):
+    if exc.status_code == 401 and not request.url.path.startswith(("/api/", "/auth/")):
+        return RedirectResponse(
+            url=f"/auth/login-redirect?return_to={quote(request.url.path)}",
+            status_code=302,
+        )
+    return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
 
 
 from xinyi_platform.ui_common import install_ui  # noqa: E402
