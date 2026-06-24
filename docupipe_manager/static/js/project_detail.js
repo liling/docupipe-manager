@@ -22,7 +22,7 @@ async function loadTasks() {
   const r = await fetch(`${API_PREFIX}/api/projects/${pid}/tasks`);
   const tasks = await r.json();
   const box = document.getElementById("tab-tasks");
-  let html = '<div class="members-header"><h3>任务</h3><a class="btn btn-sm btn-primary" href="/docupipe/projects/${pid}/tasks/new">新建任务</a></div>';
+  let html = `<div class="members-header"><h3>任务</h3><a class="btn btn-sm btn-primary" href="/docupipe/projects/${pid}/tasks/new">新建任务</a></div>`;
   if (!tasks.length) {
     box.innerHTML = html + '<div class="empty-state">暂无任务。</div>';
     return;
