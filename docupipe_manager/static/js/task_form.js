@@ -38,7 +38,7 @@ document.getElementById("task-form").addEventListener("submit", async (e) => {
   const f = e.target;
   const body = Object.fromEntries(new FormData(f).entries());
   body.schedule_enabled = f.elements.schedule_enabled.checked;
-  body.schedule_cron = f.elements.schedule_cron.value;
+  body.schedule_cron = body.schedule_enabled ? f.elements.schedule_cron.value : null;
   if (!body.credential_id) { delete body.credential_id; delete body.credential_type; }
   const url = tid ? `/api/projects/${pid}/tasks/${tid}` : `/api/projects/${pid}/tasks`;
   const method = tid ? "PUT" : "POST";

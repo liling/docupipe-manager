@@ -157,10 +157,12 @@ async def update_task(project_id: uuid.UUID, task_id: uuid.UUID, body: UpdateTas
             data["credential_id"] = uuid.UUID(data["credential_id"])
         await conn.execute(update(Task).where(Task.id == task_id).values(**data))
     from docupipe_manager.main import app
-    if data.get("schedule_cron"):
-        await app.state.scheduler.schedule_task(task_id)
-    elif "schedule_cron" in data and data["schedule_cron"] is None:
-        await app.state.scheduler.unschedule_task(task_id)
+        if data.get("schedule_cron"):
+            await app.state.scheduler.schedule_task(task_id)
+        elif "schedule_cron" in data and data["schedule_cron"] is None:
+            await app.state.scheduler.unschedule_task(task_id)
+        elif data.get("schedule_enabled") is False:
+            await app.state.scheduler.unschedule_task(task_id)
     return {"status": "updated"}
 
 
