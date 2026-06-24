@@ -206,6 +206,8 @@ class CredentialService:
             raise ValueError(f"auth_blob 不是合法的 base64: {e}") from e
 
         home_dir = mkdtemp(prefix="dws-probe-")
+        # macOS 下 dws 依赖 ~/Library/Keychains/，建空目录避免弹窗
+        os.makedirs(os.path.join(home_dir, "Library", "Keychains"), exist_ok=True)
         try:
             # 先清理可能的残留会话
             logout_proc = await asyncio.create_subprocess_exec(
