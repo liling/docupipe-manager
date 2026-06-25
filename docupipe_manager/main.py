@@ -100,48 +100,51 @@ async def lifespan(app: FastAPI):
             },
         )
 
-    active = await fetch_active_clients(
-        settings.platform_url,
-        settings.oauth_client_id,
-        settings.oauth_client_secret,
-    )
-    if hasattr(app.state, "ui") and app.state.ui:
-        app.state.ui["products"] = build_product_list(
-            active,
-            platform_url=settings.platform_url,
-            self_client_id=settings.oauth_client_id,
-            self_name="DocuPipe",
-            self_home_path="/projects",
+    product_refresh_task = None
+
+    if settings.registration_token:
+        active = await fetch_active_clients(
+            settings.platform_url,
+            settings.oauth_client_id,
+            settings.oauth_client_secret,
         )
+        if hasattr(app.state, "ui") and app.state.ui:
+            app.state.ui["products"] = build_product_list(
+                active,
+                platform_url=settings.platform_url,
+                self_client_id=settings.oauth_client_id,
+                self_name="DocuPipe",
+                self_home_path="/projects",
+            )
 
-    # Note: DM doesn't have APScheduler, use asyncio task for periodic refresh
-    async def _refresh_products_loop():
-        while True:
-            await asyncio.sleep(300)  # 5 minutes
-            try:
-                active = await fetch_active_clients(
-                    settings.platform_url,
-                    settings.oauth_client_id,
-                    settings.oauth_client_secret,
-                )
-                if hasattr(app.state, "ui") and app.state.ui:
-                    app.state.ui["products"] = build_product_list(
-                        active,
-                        platform_url=settings.platform_url,
-                        self_client_id=settings.oauth_client_id,
-                        self_name="DocuPipe",
-                        self_home_path="/projects",
+        async def _refresh_products_loop():
+            while True:
+                await asyncio.sleep(300)
+                try:
+                    active = await fetch_active_clients(
+                        settings.platform_url,
+                        settings.oauth_client_id,
+                        settings.oauth_client_secret,
                     )
-            except Exception as e:
-                logger.warning("product refresh failed: %s", e)
+                    if hasattr(app.state, "ui") and app.state.ui:
+                        app.state.ui["products"] = build_product_list(
+                            active,
+                            platform_url=settings.platform_url,
+                            self_client_id=settings.oauth_client_id,
+                            self_name="DocuPipe",
+                            self_home_path="/projects",
+                        )
+                except Exception as e:
+                    logger.warning("product refresh failed: %s", e)
 
-    product_refresh_task = asyncio.create_task(_refresh_products_loop())
+        product_refresh_task = asyncio.create_task(_refresh_products_loop())
 
     session_cleanup_task = asyncio.create_task(_session_cleanup_loop(credential))
 
     yield
 
-    product_refresh_task.cancel()
+    if product_refresh_task:
+        product_refresh_task.cancel()
     session_cleanup_task.cancel()
     await scheduler.stop()
     await engine.dispose()
