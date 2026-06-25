@@ -1,16 +1,39 @@
-FROM python:3.12-slim
-
-RUN apt-get update && apt-get install -y curl && \
-    curl -fsSL https://raw.githubusercontent.com/DingTalk-Real-AI/dingtalk-workspace-cli/main/scripts/install.sh | sh && \
-    rm -rf /var/lib/apt/lists/*
+# DocuPipe Manager
+# Build context is the parent lab/ directory (set in docker-compose.yml),
+# so both docupipe-manager/ and xinyi-platform/ sources are visible.
+FROM python:3.12-slim AS builder
 
 WORKDIR /app
 
-COPY pyproject.toml uv.lock ./
-RUN pip install uv && uv sync --frozen --no-dev
+RUN pip install --no-cache-dir uv
 
-COPY docupipe_manager ./docupipe_manager
+# Copy xinyi-platform first (DM depends on it via pyproject.toml).
+# Only copy runtime source — tests, .git, docs are excluded.
+COPY xinyi-platform/pyproject.toml xinyi-platform/uv.lock /xinyi-platform/
+COPY xinyi-platform/xinyi_platform /xinyi-platform/xinyi_platform/
 
-COPY alembic.ini ./
+# Copy DM manifests and sync deps.
+COPY docupipe-manager/pyproject.toml docupipe-manager/uv.lock ./
+RUN uv sync --frozen
 
-CMD alembic upgrade head && uvicorn docupipe_manager.main:app --host 0.0.0.0 --port 8002
+COPY docupipe-manager/docupipe_manager ./docupipe_manager
+RUN uv pip install -e .
+
+
+FROM python:3.12-slim
+
+WORKDIR /app
+
+RUN useradd -m -s /bin/bash docupipe
+
+COPY --from=builder /app /app
+COPY --from=builder /xinyi-platform /xinyi-platform
+
+USER docupipe
+
+ENV PATH="/app/.venv/bin:${PATH}"
+ENV PYTHONUNBUFFERED=1
+
+EXPOSE 8002
+
+CMD ["uvicorn", "docupipe_manager.main:app", "--host", "0.0.0.0", "--port", "8002"]
