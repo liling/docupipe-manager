@@ -18,7 +18,7 @@ class Settings(BaseSettings):
     encryption_key: str = ""
 
     platform_url: str = "http://xinyi-platform:8000/xinyi"
-    oauth_client_id: str = "docupipe-prod"
+    oauth_client_id: str = "dm-prod"
     oauth_client_secret: str = ""
     oauth_redirect_uri: str = "/auth/callback"
 

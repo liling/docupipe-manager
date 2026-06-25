@@ -11,7 +11,7 @@ from docupipe_manager.platform.config import PlatformSettings
 def settings():
     return PlatformSettings(
         platform_url="http://platform:8000",
-        oauth_client_id="docupipe-prod",
+        oauth_client_id="dm-prod",
         oauth_client_secret="test-secret",
         oauth_redirect_uri="http://localhost:8002/auth/callback",
         request_timeout_seconds=10,

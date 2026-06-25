@@ -52,7 +52,7 @@ async def test_auth_login_redirect(async_client):
     location = resp.headers.get("location", "")
     assert "/oauth/authorize" in location
     assert "response_type=code" in location
-    assert "client_id=docupipe-prod" in location
+    assert "client_id=dm-prod" in location
 
 
 @pytest.mark.asyncio

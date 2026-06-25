@@ -2,7 +2,7 @@
 from jose import jwt
 
 
-SELF_AUDIENCE = "docupipe-prod"
+SELF_AUDIENCE = "dm-prod"
 
 
 def decode_access_token(token: str, secret: str, audience: str = SELF_AUDIENCE) -> dict:

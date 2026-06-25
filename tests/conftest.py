@@ -17,7 +17,7 @@ os.environ.setdefault("DOCUPIPE_MANAGER_DATABASE_URL", "postgresql+asyncpg://tes
 os.environ.setdefault("DOCUPIPE_MANAGER_JWT_SECRET", "test-jwt-secret-thirty-two-chars!!")
 os.environ.setdefault("DOCUPIPE_MANAGER_ENCRYPTION_KEY", "a" * 32)
 os.environ.setdefault("DOCUPIPE_MANAGER_PLATFORM_URL", "http://platform:8000")
-os.environ.setdefault("DOCUPIPE_MANAGER_OAUTH_CLIENT_ID", "docupipe-prod")
+os.environ.setdefault("DOCUPIPE_MANAGER_OAUTH_CLIENT_ID", "dm-prod")
 os.environ.setdefault("DOCUPIPE_MANAGER_OAUTH_CLIENT_SECRET", "test-client-secret")
 os.environ.setdefault("DOCUPIPE_MANAGER_OAUTH_REDIRECT_URI", "http://localhost:8002/auth/callback")
 os.environ.setdefault("DOCUPIPE_MANAGER_BASE_URL", "http://localhost:8002")
