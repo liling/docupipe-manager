@@ -19,7 +19,7 @@ os.environ.setdefault("DOCUPIPE_MANAGER_ENCRYPTION_KEY", "a" * 32)
 os.environ.setdefault("DOCUPIPE_MANAGER_PLATFORM_URL", "http://platform:8000")
 os.environ.setdefault("DOCUPIPE_MANAGER_OAUTH_CLIENT_ID", "dm-prod")
 os.environ.setdefault("DOCUPIPE_MANAGER_OAUTH_CLIENT_SECRET", "test-client-secret")
-os.environ.setdefault("DOCUPIPE_MANAGER_OAUTH_REDIRECT_URI", "http://localhost:8002/auth/callback")
+os.environ.setdefault("DOCUPIPE_MANAGER_OAUTH_REDIRECT_URI", "/auth/callback")
 os.environ.setdefault("DOCUPIPE_MANAGER_BASE_URL", "http://localhost:8002")
 os.environ.setdefault("DOCUPIPE_MANAGER_DATA_DIR", "/tmp/docupipe-test")
 

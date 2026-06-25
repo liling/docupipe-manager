@@ -27,10 +27,11 @@ async def login_redirect(
     settings: Settings = Depends(_get_settings),
 ):
     state = generate_state()
+    redirect_uri = f"{settings.base_url}/docupipe{settings.oauth_redirect_uri}"
     params = (
         f"response_type=code"
         f"&client_id={settings.oauth_client_id}"
-        f"&redirect_uri={settings.oauth_redirect_uri}"
+        f"&redirect_uri={redirect_uri}"
         f"&state={state}"
         f"&return_to={return_to}"
     )
@@ -69,7 +70,8 @@ async def auth_callback(
     from docupipe_manager.main import app
     client = app.state.platform_client
 
-    token_result = await client.exchange_oauth_code(code, settings.oauth_redirect_uri)
+    redirect_uri = f"{settings.base_url}/docupipe{settings.oauth_redirect_uri}"
+    token_result = await client.exchange_oauth_code(code, redirect_uri)
     if token_result is None:
         raise HTTPException(status_code=401, detail="Failed to exchange authorization code")
 
