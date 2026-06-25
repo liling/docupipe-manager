@@ -75,9 +75,9 @@ async def lifespan(app: FastAPI):
             client_metadata={
                 "client_id": settings.oauth_client_id,
                 "name": "DocuPipe",
-                "redirect_uris": [settings.oauth_redirect_uri],
-                "logout_url": f"{settings.base_url}/docupipe/auth/logout",
                 "base_url": f"{settings.base_url}/docupipe",
+                "redirect_uris": ["/auth/callback"],
+                "logout_url": "/auth/logout",
                 "home_path": "/projects",
                 "description": "文档管道调度",
             },

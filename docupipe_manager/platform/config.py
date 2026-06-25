@@ -15,6 +15,6 @@ class PlatformSettings:
             platform_url=settings.platform_url,
             oauth_client_id=settings.oauth_client_id,
             oauth_client_secret=settings.oauth_client_secret,
-            oauth_redirect_uri=settings.oauth_redirect_uri,
+            oauth_redirect_uri=f"{settings.base_url}/docupipe{settings.oauth_redirect_uri}",
             request_timeout_seconds=settings.platform_request_timeout_seconds,
         )
