@@ -51,28 +51,11 @@ async def lifespan(app: FastAPI):
     from docupipe_manager.platform.config import PlatformSettings
     from docupipe_manager.platform.cache import UserLRUCache
 
-    platform_client = XinyiPlatformClient(PlatformSettings.from_app_settings(settings))
-    user_cache = UserLRUCache(ttl_seconds=settings.user_cache_ttl_seconds)
-
     from docupipe_manager.services.runner_service import RunnerService
     from docupipe_manager.services.scheduler_service import SchedulerService
     from docupipe_manager.services.credential_service import CredentialService
 
-    runner = RunnerService(engine, settings, platform_client)
-    scheduler = SchedulerService(runner, engine, settings)
-    credential = CredentialService(engine, settings, platform_client)
-
-    await scheduler.start()
-
-    app.state.runner = runner
-    app.state.scheduler = scheduler
-    app.state.credential = credential
-    app.state.platform_client = platform_client
-    app.state.user_cache = user_cache
-    app.state.settings = settings
-    app.state.engine = engine
-
-    # Auto-registration + service discovery
+    # Auto-registration + service discovery (before platform_client)
     from xinyi_platform.ui_common.service_discovery import (
         derive_client_secret,
         register_self,
@@ -99,6 +82,24 @@ async def lifespan(app: FastAPI):
                 "description": "文档管道调度",
             },
         )
+
+    # Now create platform_client with the correct (possibly derived) secret
+    platform_client = XinyiPlatformClient(PlatformSettings.from_app_settings(settings))
+    user_cache = UserLRUCache(ttl_seconds=settings.user_cache_ttl_seconds)
+
+    runner = RunnerService(engine, settings, platform_client)
+    scheduler = SchedulerService(runner, engine, settings)
+    credential = CredentialService(engine, settings, platform_client)
+
+    await scheduler.start()
+
+    app.state.runner = runner
+    app.state.scheduler = scheduler
+    app.state.credential = credential
+    app.state.platform_client = platform_client
+    app.state.user_cache = user_cache
+    app.state.settings = settings
+    app.state.engine = engine
 
     product_refresh_task = None
 

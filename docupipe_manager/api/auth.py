@@ -42,6 +42,7 @@ async def login_redirect(
         value=state,
         max_age=max_age,
         httponly=True,
+        path="/",
         secure=settings.base_url.startswith("https"),
         samesite="lax",
     )
