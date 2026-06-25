@@ -27,6 +27,8 @@ class Settings(BaseSettings):
     platform_request_timeout_seconds: int = 10
     user_cache_ttl_seconds: int = 300
 
+    registration_token: str = ""
+
     host: str = "0.0.0.0"
     port: int = 8002
     base_url: str = "http://localhost:8002"
