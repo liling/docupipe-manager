@@ -26,23 +26,41 @@ os.environ.setdefault("DOCUPIPE_MANAGER_DATA_DIR", "/tmp/docupipe-test")
 
 def _make_test_app(state: dict | None = None):
     """Create a FastAPI app instance for tests — lifespan disabled, app.state pre-set."""
+    from docupipe_manager import deps
+    from docupipe_manager.config import Settings
     from docupipe_manager.main import app
     from docupipe_manager.platform.cache import UserLRUCache
     app.router.lifespan_context = None
-    app.state.platform_client = AsyncMock()
-    app.state.platform_client.exchange_oauth_code = AsyncMock(return_value={
+
+    settings = Settings()
+    platform_client = AsyncMock()
+    platform_client.exchange_oauth_code = AsyncMock(return_value={
         "access_token": "test-access-token",
         "refresh_token": "test-refresh-token",
     })
-    app.state.platform_client.revoke_token = AsyncMock(return_value=None)
-    app.state.platform_client.refresh_token = AsyncMock(return_value={
+    platform_client.revoke_token = AsyncMock(return_value=None)
+    platform_client.refresh_token = AsyncMock(return_value={
         "access_token": "new-access-token",
         "refresh_token": "new-refresh-token",
     })
-    app.state.user_cache = UserLRUCache(ttl_seconds=30)
+    user_cache = UserLRUCache(ttl_seconds=30)
+
+    app.state.platform_client = platform_client
+    app.state.user_cache = user_cache
+    app.state.settings = settings
     if state:
         for k, v in state.items():
             setattr(app.state, k, v)
+
+    deps.init(
+        engine=state.get("engine", MagicMock()) if state else MagicMock(),
+        settings=settings,
+        runner=state.get("runner", MagicMock()) if state else MagicMock(),
+        scheduler=state.get("scheduler", MagicMock()) if state else MagicMock(),
+        credential=state.get("credential", MagicMock()) if state else MagicMock(),
+        platform_client=platform_client,
+        user_cache=user_cache,
+    )
     return app
 
 

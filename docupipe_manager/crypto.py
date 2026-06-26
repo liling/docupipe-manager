@@ -4,7 +4,6 @@ import secrets
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 
 _CBC_FLAG_LEN = 2  # hex chars for version byte (0x02 → "02")
-_IV_HEX_LEN = 32   # 16 bytes IV as hex
 
 
 def encrypt_sm4(plaintext: str, key_hex: str) -> str:

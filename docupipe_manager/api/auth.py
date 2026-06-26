@@ -21,8 +21,7 @@ async def login_redirect(
     request: Request,
     return_to: str = "/docupipe/projects",
 ):
-    from docupipe_manager.config import Settings
-    settings = Settings()
+    settings = deps.get_settings()
     state = generate_state()
     redirect_uri = f"{settings.base_url}/docupipe{settings.oauth_redirect_uri}"
     params = (
@@ -56,8 +55,7 @@ async def auth_callback(
     return_to: str = "/docupipe/projects",
     oauth_state: Optional[str] = Cookie(default=None, alias=STATE_COOKIE),
 ):
-    from docupipe_manager.config import Settings
-    settings = Settings()
+    settings = deps.get_settings()
     if not code:
         raise HTTPException(status_code=400, detail="Missing authorization code")
     if not verify_state(oauth_state or "", state):
@@ -105,8 +103,7 @@ async def auth_refresh(
     response: Response,
     docupipe_refresh: Optional[str] = Cookie(default=None, alias=REFRESH_COOKIE),
 ):
-    from docupipe_manager.config import Settings
-    settings = Settings()
+    settings = deps.get_settings()
     if not docupipe_refresh:
         return RedirectResponse(url="/auth/login-redirect")
 
@@ -150,8 +147,7 @@ async def auth_logout(
     docupipe_session: Optional[str] = Cookie(default=None, alias=SESSION_COOKIE),
     docupipe_refresh: Optional[str] = Cookie(default=None, alias=REFRESH_COOKIE),
 ):
-    from docupipe_manager.config import Settings
-    settings = Settings()
+    settings = deps.get_settings()
     client = deps.get_platform_client()
 
     if docupipe_refresh:
