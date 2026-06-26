@@ -21,7 +21,7 @@ async def test_create_project_admin_ok(async_client):
     override_get_current_user({"id": uid, "username": "a", "role": "admin"})
     fake_project = MagicMock()
     fake_project.id = uuid.uuid4()
-    with patch("docupipe_manager.api.projects._get_engine") as mock_ge:
+    with patch("docupipe_manager.deps.get_engine") as mock_get_engine:
         mock_conn = AsyncMock()
         mock_conn.execute = AsyncMock(return_value=MagicMock(fetchone=MagicMock(return_value=None)))
         mock_conn.add = MagicMock()
@@ -34,7 +34,7 @@ async def test_create_project_admin_ok(async_client):
         mock_engine = MagicMock()
         mock_engine.begin.return_value.__aenter__ = AsyncMock(return_value=mock_conn)
         mock_engine.begin.return_value.__aexit__ = AsyncMock(return_value=None)
-        mock_ge.return_value = mock_engine
+        mock_get_engine.return_value = mock_engine
 
         r = await async_client.post("/docupipe/admin/api/projects", json={"name": "p", "slug": "p"})
         assert r.status_code == 200

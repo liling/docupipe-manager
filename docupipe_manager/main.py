@@ -13,6 +13,7 @@ from fastapi.responses import JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy import text
 
+from docupipe_manager import deps
 from docupipe_manager.config import Settings
 from docupipe_manager.db import init_db, get_engine
 
@@ -100,6 +101,16 @@ async def lifespan(app: FastAPI):
     app.state.user_cache = user_cache
     app.state.settings = settings
     app.state.engine = engine
+
+    deps.init(
+        engine=engine,
+        settings=settings,
+        runner=runner,
+        scheduler=scheduler,
+        credential=credential,
+        platform_client=platform_client,
+        user_cache=user_cache,
+    )
 
     product_refresh_task = None
 

@@ -5,7 +5,8 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy import delete, insert, select, update
 
-from docupipe_manager.api.projects import _get_engine, _require_access_async
+from docupipe_manager import deps
+from docupipe_manager.api.projects import _require_access_async
 from docupipe_manager.config import Settings
 from docupipe_manager.crypto import encrypt_sm4
 from docupipe_manager.models.project_env_var import ProjectEnvVar
@@ -43,7 +44,7 @@ def _serialize(row, mask_secret: bool) -> dict:
 
 @router.get("")
 async def list_env_vars(project_id: uuid.UUID, user: dict = Depends(_require_access_async)):
-    engine = _get_engine()
+    engine = deps.get_engine()
     async with engine.begin() as conn:
         rows = (await conn.execute(
             select(ProjectEnvVar).where(ProjectEnvVar.project_id == project_id)
@@ -55,7 +56,7 @@ async def list_env_vars(project_id: uuid.UUID, user: dict = Depends(_require_acc
 @router.post("")
 async def create_env_var(project_id: uuid.UUID, body: CreateEnvVarRequest,
                          user: dict = Depends(_require_access_async)):
-    engine = _get_engine()
+    engine = deps.get_engine()
     async with engine.begin() as conn:
         existing = (await conn.execute(
             select(ProjectEnvVar).where(
@@ -79,7 +80,7 @@ async def create_env_var(project_id: uuid.UUID, body: CreateEnvVarRequest,
 @router.put("/{var_id}")
 async def update_env_var(project_id: uuid.UUID, var_id: uuid.UUID, body: UpdateEnvVarRequest,
                          user: dict = Depends(_require_access_async)):
-    engine = _get_engine()
+    engine = deps.get_engine()
     async with engine.begin() as conn:
         current = (await conn.execute(
             select(ProjectEnvVar).where(
@@ -110,7 +111,6 @@ async def update_env_var(project_id: uuid.UUID, var_id: uuid.UUID, body: UpdateE
                     data.pop("value")  # secret + 空/null = 保持原值
             elif data["value"] is None:
                 data.pop("value")  # 非 secret + null = 保持原值，避免 NOT NULL 违约
-            # 非 secret + 非 null（含空串）→ 明文更新
 
         if data:
             await conn.execute(
@@ -122,7 +122,7 @@ async def update_env_var(project_id: uuid.UUID, var_id: uuid.UUID, body: UpdateE
 @router.delete("/{var_id}")
 async def delete_env_var(project_id: uuid.UUID, var_id: uuid.UUID,
                          user: dict = Depends(_require_access_async)):
-    engine = _get_engine()
+    engine = deps.get_engine()
     async with engine.begin() as conn:
         existing = (await conn.execute(
             select(ProjectEnvVar).where(

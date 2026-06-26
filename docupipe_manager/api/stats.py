@@ -1,6 +1,7 @@
 
 from fastapi import APIRouter, Depends
 
+from docupipe_manager import deps
 from docupipe_manager.auth.dependencies import get_current_user
 
 router = APIRouter(prefix="/api", tags=["stats"])
@@ -10,10 +11,9 @@ router = APIRouter(prefix="/api", tags=["stats"])
 async def get_stats(
     user: dict = Depends(get_current_user),
 ):
-    from docupipe_manager.main import app
     from sqlalchemy import text as sqla_text
 
-    engine = app.state.engine
+    engine = deps.get_engine()
 
     async with engine.begin() as conn:
         if user.get("role") == "admin":

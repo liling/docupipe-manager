@@ -1,4 +1,4 @@
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, patch
 
 import pytest
 from fastapi import HTTPException
@@ -93,19 +93,22 @@ async def test_callback_invalid_state(async_client):
 
 @pytest.mark.asyncio
 async def test_logout_clears_cookies(async_client):
-    resp = await async_client.post(
-        "/docupipe/auth/logout",
-        cookies={
-            "docupipe_session": "test-session",
-            "docupipe_refresh": "test-refresh",
-        },
-    )
-    assert resp.status_code == 303
-    location = resp.headers.get("location", "")
-    assert "logout" in location
-    assert "platform" in location
-    set_cookie = resp.headers.get("set-cookie", "")
-    assert "docupipe_session=" in set_cookie or "Max-Age=0" in set_cookie
+    mock_client = AsyncMock()
+    mock_client.revoke_user_session = AsyncMock()
+    with patch("docupipe_manager.deps.get_platform_client", return_value=mock_client):
+        resp = await async_client.post(
+            "/docupipe/auth/logout",
+            cookies={
+                "docupipe_session": "test-session",
+                "docupipe_refresh": "test-refresh",
+            },
+        )
+        assert resp.status_code == 303
+        location = resp.headers.get("location", "")
+        assert "logout" in location
+        assert "platform" in location
+        set_cookie = resp.headers.get("set-cookie", "")
+        assert "docupipe_session=" in set_cookie or "Max-Age=0" in set_cookie
 
 
 @pytest.mark.asyncio

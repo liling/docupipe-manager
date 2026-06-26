@@ -6,7 +6,8 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 from sqlalchemy import insert, select, update
 from typing_extensions import Literal
 
-from docupipe_manager.api.projects import _require_access_async, _get_engine
+from docupipe_manager import deps
+from docupipe_manager.api.projects import _require_access_async
 from docupipe_manager.models.task import Task, TaskStatus
 
 router = APIRouter(prefix="/api/projects/{project_id}/tasks", tags=["tasks"])
@@ -96,7 +97,7 @@ class TriggerRequest(BaseModel):
 @router.get("")
 async def list_tasks(project_id: uuid.UUID, user: dict = Depends(_require_access_async)):
     from sqlalchemy import text
-    engine = _get_engine()
+    engine = deps.get_engine()
     async with engine.begin() as conn:
         rows = (await conn.execute(text("""
             SELECT t.id, t.name, t.slug, t.schedule_cron, t.schedule_enabled,
@@ -113,7 +114,7 @@ async def list_tasks(project_id: uuid.UUID, user: dict = Depends(_require_access
 @router.post("")
 async def create_task(project_id: uuid.UUID, body: CreateTaskRequest,
                       user: dict = Depends(_require_access_async)):
-    engine = _get_engine()
+    engine = deps.get_engine()
     task_id = uuid.uuid4()
     async with engine.begin() as conn:
         await conn.execute(
@@ -128,15 +129,14 @@ async def create_task(project_id: uuid.UUID, body: CreateTaskRequest,
             )
         )
     if body.schedule_cron:
-        from docupipe_manager.main import app
-        await app.state.scheduler.schedule_task(task_id)
+        await deps.get_scheduler().schedule_task(task_id)
     return {"id": str(task_id)}
 
 
 @router.get("/{task_id}")
 async def get_task(project_id: uuid.UUID, task_id: uuid.UUID,
                    user: dict = Depends(_require_access_async)):
-    engine = _get_engine()
+    engine = deps.get_engine()
     async with engine.begin() as conn:
         t = (await conn.execute(select(Task).where(Task.id == task_id, Task.project_id == project_id))).fetchone()
     if t is None:
@@ -147,7 +147,7 @@ async def get_task(project_id: uuid.UUID, task_id: uuid.UUID,
 @router.put("/{task_id}")
 async def update_task(project_id: uuid.UUID, task_id: uuid.UUID, body: UpdateTaskRequest,
                       user: dict = Depends(_require_access_async)):
-    engine = _get_engine()
+    engine = deps.get_engine()
     async with engine.begin() as conn:
         t = (await conn.execute(select(Task).where(Task.id == task_id, Task.project_id == project_id))).fetchone()
         if t is None:
@@ -156,40 +156,38 @@ async def update_task(project_id: uuid.UUID, task_id: uuid.UUID, body: UpdateTas
         if data.get("credential_id"):
             data["credential_id"] = uuid.UUID(data["credential_id"])
         await conn.execute(update(Task).where(Task.id == task_id).values(**data))
-    from docupipe_manager.main import app
+    scheduler = deps.get_scheduler()
     if data.get("schedule_cron"):
-        await app.state.scheduler.schedule_task(task_id)
+        await scheduler.schedule_task(task_id)
     elif "schedule_cron" in data and data["schedule_cron"] is None:
-        await app.state.scheduler.unschedule_task(task_id)
+        await scheduler.unschedule_task(task_id)
     elif data.get("schedule_enabled") is False:
-        await app.state.scheduler.unschedule_task(task_id)
+        await scheduler.unschedule_task(task_id)
     return {"status": "updated"}
 
 
 @router.delete("/{task_id}")
 async def archive_task(project_id: uuid.UUID, task_id: uuid.UUID,
                        user: dict = Depends(_require_access_async)):
-    engine = _get_engine()
+    engine = deps.get_engine()
     async with engine.begin() as conn:
         t = (await conn.execute(select(Task).where(Task.id == task_id, Task.project_id == project_id))).fetchone()
         if t is None:
             raise HTTPException(status_code=404, detail="Task not found")
         await conn.execute(update(Task).where(Task.id == task_id).values(status=TaskStatus.archived))
-    from docupipe_manager.main import app
-    await app.state.scheduler.unschedule_task(task_id)
+    await deps.get_scheduler().unschedule_task(task_id)
     return {"status": "archived"}
 
 
 @router.post("/{task_id}/trigger")
 async def trigger_task(project_id: uuid.UUID, task_id: uuid.UUID, body: TriggerRequest,
                        user: dict = Depends(_require_access_async)):
-    engine = _get_engine()
+    engine = deps.get_engine()
     async with engine.begin() as conn:
         t = (await conn.execute(select(Task).where(Task.id == task_id, Task.project_id == project_id))).fetchone()
         if t is None:
             raise HTTPException(status_code=404, detail="Task not found")
-    from docupipe_manager.main import app
-    run = await app.state.runner.start_run(
+    run = await deps.get_runner().start_run(
         task_id=task_id, trigger_type="manual", triggered_by=uuid.UUID(user["id"]),
         pipeline_name=body.pipeline_name or t.schedule_pipeline,
         mode=body.mode or t.schedule_mode,

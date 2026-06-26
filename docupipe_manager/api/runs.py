@@ -5,7 +5,7 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
-from docupipe_manager.api.projects import _get_engine
+from docupipe_manager import deps
 from docupipe_manager.auth.dependencies import get_current_user
 
 router = APIRouter(prefix="/api/runs", tags=["runs"])
@@ -17,7 +17,7 @@ async def _verify_run_access(run_id: uuid.UUID, user: dict):
     from sqlalchemy import select, text
     from docupipe_manager.models.pipeline_run import PipelineRun
 
-    engine = _get_engine()
+    engine = deps.get_engine()
     async with engine.begin() as conn:
         result = await conn.execute(
             select(PipelineRun).where(PipelineRun.id == run_id)
@@ -55,7 +55,7 @@ async def list_runs(
     from docupipe_manager.models.task import Task
     from docupipe_manager.models.project import Project
 
-    engine = _get_engine()
+    engine = deps.get_engine()
 
     conditions = []
     if task_id:
@@ -136,7 +136,7 @@ async def _run_detail(run_id: uuid.UUID) -> dict:
     from docupipe_manager.models.pipeline_run import PipelineRun
     from docupipe_manager.models.task import Task
 
-    engine = _get_engine()
+    engine = deps.get_engine()
     async with engine.begin() as conn:
         run = (await conn.execute(
             select(PipelineRun).where(PipelineRun.id == run_id)
@@ -218,10 +218,9 @@ def _sse(event: str, payload) -> str:
 @router.get("/{run_id}/stream")
 async def stream_run(run_id: uuid.UUID, user: dict = Depends(get_current_user)):
     from fastapi.responses import StreamingResponse
-    from docupipe_manager.main import app
 
     await _verify_run_access(run_id, user)
-    runner = app.state.runner
+    runner = deps.get_runner()
 
     async def event_stream():
         meta = await _run_detail(run_id)
@@ -249,7 +248,6 @@ async def stream_run(run_id: uuid.UUID, user: dict = Depends(get_current_user)):
             finally:
                 runner.unsubscribe(run_id, queue)
 
-        # 竞态回退：缓冲已被 _close_subscribers 销毁时，从文件读取
         if log_path and not had_logs:
             try:
                 with open(log_path) as f:
@@ -292,9 +290,9 @@ async def cancel_run(
 ):
     await _verify_run_access(run_id, user)
 
-    from docupipe_manager.main import app
+    runner = deps.get_runner()
     try:
-        await app.state.runner.cancel_run(run_id)
+        await runner.cancel_run(run_id)
         return {"status": "cancelled"}
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))

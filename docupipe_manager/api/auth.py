@@ -4,9 +4,9 @@ from typing import Optional
 from fastapi import APIRouter, Cookie, Depends, HTTPException, Request, Response
 from fastapi.responses import RedirectResponse
 
+from docupipe_manager import deps
 from docupipe_manager.auth.dependencies import SESSION_COOKIE
 from docupipe_manager.auth.oauth_state import generate_state, verify_state
-from docupipe_manager.config import Settings
 
 logger = logging.getLogger(__name__)
 
@@ -16,16 +16,13 @@ REFRESH_COOKIE = "docupipe_refresh"
 STATE_COOKIE = "docupipe_oauth_state"
 
 
-def _get_settings() -> Settings:
-    return Settings()
-
-
 @router.get("/login-redirect")
 async def login_redirect(
     request: Request,
     return_to: str = "/docupipe/projects",
-    settings: Settings = Depends(_get_settings),
 ):
+    from docupipe_manager.config import Settings
+    settings = Settings()
     state = generate_state()
     redirect_uri = f"{settings.base_url}/docupipe{settings.oauth_redirect_uri}"
     params = (
@@ -58,8 +55,9 @@ async def auth_callback(
     state: str = "",
     return_to: str = "/docupipe/projects",
     oauth_state: Optional[str] = Cookie(default=None, alias=STATE_COOKIE),
-    settings: Settings = Depends(_get_settings),
 ):
+    from docupipe_manager.config import Settings
+    settings = Settings()
     if not code:
         raise HTTPException(status_code=400, detail="Missing authorization code")
     if not verify_state(oauth_state or "", state):
@@ -67,8 +65,7 @@ async def auth_callback(
 
     response.delete_cookie(key=STATE_COOKIE)
 
-    from docupipe_manager.main import app
-    client = app.state.platform_client
+    client = deps.get_platform_client()
 
     redirect_uri = f"{settings.base_url}/docupipe{settings.oauth_redirect_uri}"
     token_result = await client.exchange_oauth_code(code, redirect_uri)
@@ -107,13 +104,13 @@ async def auth_refresh(
     request: Request,
     response: Response,
     docupipe_refresh: Optional[str] = Cookie(default=None, alias=REFRESH_COOKIE),
-    settings: Settings = Depends(_get_settings),
 ):
+    from docupipe_manager.config import Settings
+    settings = Settings()
     if not docupipe_refresh:
         return RedirectResponse(url="/auth/login-redirect")
 
-    from docupipe_manager.main import app
-    client = app.state.platform_client
+    client = deps.get_platform_client()
 
     token_result = await client.refresh_token(docupipe_refresh)
     if token_result is None:
@@ -152,10 +149,10 @@ async def auth_logout(
     response: Response,
     docupipe_session: Optional[str] = Cookie(default=None, alias=SESSION_COOKIE),
     docupipe_refresh: Optional[str] = Cookie(default=None, alias=REFRESH_COOKIE),
-    settings: Settings = Depends(_get_settings),
 ):
-    from docupipe_manager.main import app
-    client = app.state.platform_client
+    from docupipe_manager.config import Settings
+    settings = Settings()
+    client = deps.get_platform_client()
 
     if docupipe_refresh:
         await client.revoke_user_session(docupipe_refresh)
@@ -178,6 +175,3 @@ async def auth_logout_get(
     resp.delete_cookie(key=SESSION_COOKIE, path="/")
     resp.delete_cookie(key=REFRESH_COOKIE, path="/")
     return resp
-
-
-

@@ -5,6 +5,7 @@ import shlex
 import signal
 import uuid
 from collections import deque
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 import tempfile
 
@@ -20,6 +21,17 @@ from docupipe_manager.models.task import CredentialType, Task
 from docupipe_manager.platform.client import XinyiPlatformClient
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass
+class _RunContext:
+    task: Task
+    credential: DwsCredential | None
+    slug: str
+    mode: str
+    pipeline_name: str | None
+    config_yaml: str
+    project_env: dict[str, str] = field(default_factory=dict)
 
 
 class RunnerService:
@@ -44,7 +56,7 @@ class RunnerService:
         queue: asyncio.Queue = asyncio.Queue()
         self._subscribers.setdefault(run_id, set()).add(queue)
         if run_id not in self._active_runs:
-            queue.put_nowait(None)   # run already ended; guarantee the sentinel
+            queue.put_nowait(None)
         return history, queue
 
     def unsubscribe(self, run_id: uuid.UUID, queue: asyncio.Queue) -> None:
@@ -77,7 +89,6 @@ class RunnerService:
         pipeline_name: str | None = None,
         mode: str = "incremental",
     ) -> PipelineRun:
-        """Create a run record and start execution in background."""
         run = PipelineRun(
             task_id=task_id,
             trigger_type=trigger_type,
@@ -95,7 +106,6 @@ class RunnerService:
         return run
 
     async def cancel_run(self, run_id: uuid.UUID) -> None:
-        """Cancel a run. Running → SIGTERM. Pending → status change."""
         async with self._session_factory() as session:
             run = await session.get(PipelineRun, run_id)
             if run is None:
@@ -113,7 +123,6 @@ class RunnerService:
                 await session.commit()
 
     async def _execute_run(self, run_id: uuid.UUID) -> None:
-        """Run the pipeline in a subprocess. Fire-and-forget."""
         self._active_runs.add(run_id)
         async with self._semaphore:
             try:
@@ -129,99 +138,185 @@ class RunnerService:
                 self._active_runs.discard(run_id)
                 await self._close_subscribers(run_id)
 
-    async def _do_execute(self, run_id: uuid.UUID) -> None:
-        async with self._session_factory() as session:
-            run = await session.get(PipelineRun, run_id)
-            if run is None:
-                return
-            task = await session.get(Task, run.task_id)
-            if task is None:
-                await self._mark_run_failed(run_id, "Task not found")
-                return
-            credential = None
-            if task.credential_id is not None and task.credential_type is not None:
-                if task.credential_type == CredentialType.dws:
-                    credential = await session.get(DwsCredential, task.credential_id)
-                else:
-                    await self._mark_run_failed(run_id, f"Unsupported credential type: {task.credential_type}")
-                    return
-                if credential is None:
-                    await self._mark_run_failed(run_id, "Credential not found")
-                    return
+    async def _load_context(self, session, run) -> _RunContext | None:
+        run_id = run.id
+        task = await session.get(Task, run.task_id)
+        if task is None:
+            await self._mark_run_failed(run_id, "Task not found")
+            return None
+        credential = None
+        if task.credential_id is not None and task.credential_type is not None:
+            if task.credential_type == CredentialType.dws:
+                credential = await session.get(DwsCredential, task.credential_id)
+            else:
+                await self._mark_run_failed(run_id, f"Unsupported credential type: {task.credential_type}")
+                return None
+            if credential is None:
+                await self._mark_run_failed(run_id, "Credential not found")
+                return None
 
-            config_yaml = task.config_yaml
-            slug = task.slug
-            mode = run.mode
-            pipeline_name = run.pipeline_name
-            cred_type = task.credential_type
-
-            env_var_rows = (await session.execute(
-                select(ProjectEnvVar).where(ProjectEnvVar.project_id == task.project_id)
-            )).scalars().all()
-
-        settings = self._settings
+        env_var_rows = (await session.execute(
+            select(ProjectEnvVar).where(ProjectEnvVar.project_id == task.project_id)
+        )).scalars().all()
 
         project_env: dict[str, str] = {}
         for ev in env_var_rows:
             if ev.is_secret:
                 try:
-                    ev_value = decrypt_sm4(ev.value, settings.encryption_key)
+                    ev_value = decrypt_sm4(ev.value, self._settings.encryption_key)
                 except Exception:
                     await self._mark_run_failed(run_id, f"环境变量 {ev.key} 解密失败")
-                    return
+                    return None
             else:
                 ev_value = ev.value
             project_env[ev.key] = ev_value
 
-        project_dir = os.path.join(settings.data_dir, "tasks", str(task.id))
-        os.makedirs(project_dir, exist_ok=True)
+        return _RunContext(
+            task=task,
+            credential=credential,
+            slug=task.slug,
+            mode=run.mode,
+            pipeline_name=run.pipeline_name,
+            config_yaml=task.config_yaml,
+            project_env=project_env,
+        )
 
+    def _write_config(self, project_dir: str, config_yaml: str) -> str:
         config_path = os.path.join(project_dir, "config.yaml")
         with open(config_path, "w") as f:
             f.write(config_yaml)
+        return config_path
 
+    def _build_command(self, ctx: _RunContext, config_path: str, state_dir: str) -> tuple[list[str], str]:
+        cmd = [
+            self._settings.docupipe_python, "-m", "docupipe",
+            "--state-dir", state_dir,
+            "--log-level", "INFO",
+            "run",
+            "--config", config_path,
+            "--mode", ctx.mode,
+        ]
+        if ctx.pipeline_name:
+            cmd.extend(["--pipeline", ctx.pipeline_name])
+        command_text = " ".join(shlex.quote(c) for c in cmd)
+        return cmd, command_text
+
+    async def _import_credential(self, ctx: _RunContext) -> str:
+        key_hex = self._settings.encryption_key
+        auth_b64 = decrypt_sm4(ctx.credential.auth_blob.hex(), key_hex)
+
+        fd, auth_temp_path = tempfile.mkstemp(suffix=".b64", prefix="dws-run-")
+        os.close(fd)
+        with open(auth_temp_path, "w") as f:
+            f.write(auth_b64)
+
+        logout_before = await asyncio.create_subprocess_exec(
+            self._settings.dws_cli_path, "auth", "logout",
+            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+        )
+        await logout_before.communicate()
+
+        import_proc = await asyncio.create_subprocess_exec(
+            self._settings.dws_cli_path, "auth", "import", "--base64", "-i", auth_temp_path,
+            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+        )
+        await import_proc.communicate()
+        return auth_temp_path
+
+    async def _stream_subprocess(
+        self, cmd: list[str], project_env: dict[str, str],
+        project_dir: str, log_path: str, run_id: uuid.UUID,
+    ) -> tuple[int, str | None]:
+        proc = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT,
+            env={**os.environ, **project_env},
+            cwd=project_dir,
+        )
+        async with self._session_factory() as session:
+            await session.execute(
+                update(PipelineRun).where(PipelineRun.id == run_id).values(pid=proc.pid)
+            )
+            await session.commit()
+
+        max_bytes = self._settings.run_log_max_bytes
+        with open(log_path, "w") as log_file:
+            while True:
+                line = await proc.stdout.readline()
+                if not line:
+                    break
+                text = line.decode("utf-8", errors="replace")
+                log_file.write(text)
+                log_file.flush()
+                if log_file.tell() > max_bytes:
+                    log_file.truncate(max_bytes // 2)
+                    log_file.seek(0, 2)
+                self._broadcast(run_id, text.rstrip("\n"))
+
+        exit_code = await proc.wait()
+        error_message = None
+        if exit_code != 0:
+            try:
+                with open(log_path, "r") as f:
+                    content = f.read()
+                error_message = content[-2048:] if len(content) > 2048 else content
+            except OSError:
+                pass
+        return exit_code, error_message
+
+    async def _finalize_run(
+        self, run_id: uuid.UUID, exit_code: int,
+        error_message: str | None, task_id: uuid.UUID,
+    ) -> None:
+        completed_at = datetime.now(timezone.utc)
+        status = RunStatus.succeeded if exit_code == 0 else RunStatus.failed
+
+        async with self._session_factory() as session:
+            await session.execute(
+                update(PipelineRun).where(PipelineRun.id == run_id).values(
+                    status=status,
+                    exit_code=exit_code,
+                    completed_at=completed_at,
+                    error_message=error_message,
+                    pid=None,
+                )
+            )
+            await session.commit()
+
+        event = f"docupipe.run.{'success' if status == RunStatus.succeeded else 'fail'}"
+        asyncio.create_task(self._platform_client.push_audit({
+            "event": event,
+            "run_id": str(run_id),
+            "task_id": str(task_id),
+            "exit_code": exit_code,
+        }))
+
+    async def _do_execute(self, run_id: uuid.UUID) -> None:
+        async with self._session_factory() as session:
+            run = await session.get(PipelineRun, run_id)
+            if run is None:
+                return
+            ctx = await self._load_context(session, run)
+            if ctx is None:
+                return
+
+        project_dir = os.path.join(self._settings.data_dir, "tasks", str(ctx.task.id))
         state_dir = os.path.join(project_dir, ".state")
         log_dir = os.path.join(project_dir, "runs")
+        os.makedirs(project_dir, exist_ok=True)
         os.makedirs(log_dir, exist_ok=True)
         log_path = os.path.join(log_dir, f"{run_id}.log")
 
+        config_path = self._write_config(project_dir, ctx.config_yaml)
+
+        cmd, command_text = self._build_command(ctx, config_path, state_dir)
+
+        auth_temp_path = None
+        imported = False
         try:
-            auth_temp_path = None
-            imported = False
-            if credential is not None:
-                key_hex = settings.encryption_key
-                auth_b64 = decrypt_sm4(credential.auth_blob.hex(), key_hex)
-
-                fd, auth_temp_path = tempfile.mkstemp(suffix=".b64", prefix="dws-run-")
-                os.close(fd)
-                with open(auth_temp_path, "w") as f:
-                    f.write(auth_b64)
-
-                # 使用真实 HOME 保证钥匙串可访问，先清理残留会话再导入
-                logout_before = await asyncio.create_subprocess_exec(
-                    settings.dws_cli_path, "auth", "logout",
-                    stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
-                )
-                await logout_before.communicate()
-
-                import_proc = await asyncio.create_subprocess_exec(
-                    settings.dws_cli_path, "auth", "import", "--base64", "-i", auth_temp_path,
-                    stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
-                )
-                await import_proc.communicate()
+            if ctx.credential is not None:
+                auth_temp_path = await self._import_credential(ctx)
                 imported = True
-
-            cmd = [
-                settings.docupipe_python, "-m", "docupipe",
-                "--state-dir", state_dir,
-                "--log-level", "INFO",
-                "run",
-                "--config", config_path,
-                "--mode", mode,
-            ]
-            if pipeline_name:
-                cmd.extend(["--pipeline", pipeline_name])
-            command_text = " ".join(shlex.quote(c) for c in cmd)
 
             started_at = datetime.now(timezone.utc)
             async with self._session_factory() as session:
@@ -235,65 +330,11 @@ class RunnerService:
                 )
                 await session.commit()
 
-            proc = await asyncio.create_subprocess_exec(
-                *cmd,
-                stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT,
-                env={**os.environ, **project_env},
-                cwd=project_dir,
+            exit_code, error_message = await self._stream_subprocess(
+                cmd, ctx.project_env, project_dir, log_path, run_id,
             )
 
-            async with self._session_factory() as session:
-                await session.execute(
-                    update(PipelineRun).where(PipelineRun.id == run_id).values(pid=proc.pid)
-                )
-                await session.commit()
-
-            max_bytes = self._settings.run_log_max_bytes
-            with open(log_path, "w") as log_file:
-                while True:
-                    line = await proc.stdout.readline()
-                    if not line:
-                        break
-                    text = line.decode("utf-8", errors="replace")
-                    log_file.write(text)
-                    log_file.flush()
-                    if log_file.tell() > max_bytes:
-                        log_file.truncate(max_bytes // 2)
-                        log_file.seek(0, 2)
-                    self._broadcast(run_id, text.rstrip("\n"))
-
-            exit_code = await proc.wait()
-            completed_at = datetime.now(timezone.utc)
-            status = RunStatus.succeeded if exit_code == 0 else RunStatus.failed
-
-            error_message = None
-            if exit_code != 0:
-                try:
-                    with open(log_path, "r") as f:
-                        content = f.read()
-                    error_message = content[-2048:] if len(content) > 2048 else content
-                except OSError:
-                    pass
-
-            async with self._session_factory() as session:
-                await session.execute(
-                    update(PipelineRun).where(PipelineRun.id == run_id).values(
-                        status=status,
-                        exit_code=exit_code,
-                        completed_at=completed_at,
-                        error_message=error_message,
-                        pid=None,
-                    )
-                )
-                await session.commit()
-
-            event = f"docupipe.run.{'success' if status == RunStatus.succeeded else 'fail'}"
-            asyncio.create_task(self._platform_client.push_audit({
-                "event": event,
-                "run_id": str(run_id),
-                "task_id": str(run.task_id),
-                "exit_code": exit_code,
-            }))
+            await self._finalize_run(run_id, exit_code, error_message, ctx.task.id)
 
         finally:
             if auth_temp_path:
@@ -301,11 +342,10 @@ class RunnerService:
                     os.unlink(auth_temp_path)
                 except OSError:
                     pass
-            # 清理 dws 会话，避免影响用户终端
             if imported:
                 try:
                     logout_proc = await asyncio.create_subprocess_exec(
-                        settings.dws_cli_path, "auth", "logout",
+                        self._settings.dws_cli_path, "auth", "logout",
                         stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
                     )
                     await logout_proc.communicate()

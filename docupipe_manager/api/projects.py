@@ -6,6 +6,7 @@ from pydantic import BaseModel, Field
 
 from sqlalchemy import insert
 
+from docupipe_manager import deps
 from docupipe_manager.auth.dependencies import get_current_user, require_admin
 from docupipe_manager.models.project import Project, ProjectStatus
 from docupipe_manager.models.project_member import MemberRole, ProjectMember
@@ -26,11 +27,6 @@ class UpdateProjectRequest(BaseModel):
     status: Optional[str] = None
 
 
-def _get_engine():
-    from docupipe_manager.main import app
-    return app.state.engine
-
-
 async def _require_access_async(project_id: uuid.UUID, user: dict = Depends(get_current_user)) -> dict:
     from docupipe_manager.auth.project_access import is_project_member, is_project_owner
     if user.get("role") == "admin":
@@ -38,7 +34,7 @@ async def _require_access_async(project_id: uuid.UUID, user: dict = Depends(get_
     if await is_project_owner(project_id, user) or await is_project_member(project_id, user):
         return user
     from sqlalchemy import text
-    async with _get_engine().begin() as conn:
+    async with deps.get_engine().begin() as conn:
         exists = (await conn.execute(
             text("SELECT 1 FROM docupipe_manager.projects WHERE id = :pid AND status != 'archived'"),
             {"pid": str(project_id)},
@@ -52,7 +48,7 @@ async def _require_owner_async(project_id: uuid.UUID, user: dict = Depends(get_c
     if await is_project_owner(project_id, user):
         return user
     from sqlalchemy import text
-    async with _get_engine().begin() as conn:
+    async with deps.get_engine().begin() as conn:
         exists = (await conn.execute(
             text("SELECT 1 FROM docupipe_manager.projects WHERE id = :pid AND status != 'archived'"),
             {"pid": str(project_id)},
@@ -77,7 +73,7 @@ def _project_dict(row, is_owner: bool | None = None, can_manage_members: bool | 
 @admin_router.post("")
 async def create_project(body: CreateProjectRequest, user: dict = Depends(require_admin)):
     from sqlalchemy import select
-    engine = _get_engine()
+    engine = deps.get_engine()
     async with engine.begin() as conn:
         existing = (await conn.execute(select(Project).where(
             (Project.slug == body.slug) | (Project.name == body.name)
@@ -105,7 +101,7 @@ async def create_project(body: CreateProjectRequest, user: dict = Depends(requir
 async def list_projects(user: dict = Depends(get_current_user)):
     """admin 看全部；普通用户看自己 Member 的项目（未归档）。"""
     from sqlalchemy import select, text
-    engine = _get_engine()
+    engine = deps.get_engine()
     async with engine.begin() as conn:
         if user.get("role") == "admin":
             rows = (await conn.execute(
@@ -125,7 +121,7 @@ async def list_projects(user: dict = Depends(get_current_user)):
 @router.get("/{project_id}")
 async def get_project(project_id: uuid.UUID, user: dict = Depends(_require_access_async)):
     from sqlalchemy import select, text
-    engine = _get_engine()
+    engine = deps.get_engine()
     async with engine.begin() as conn:
         row = (await conn.execute(select(Project).where(Project.id == project_id))).fetchone()
         if row is None:
@@ -142,7 +138,7 @@ async def get_project(project_id: uuid.UUID, user: dict = Depends(_require_acces
 async def update_project(project_id: uuid.UUID, body: UpdateProjectRequest,
                          user: dict = Depends(_require_access_async)):
     from sqlalchemy import select
-    engine = _get_engine()
+    engine = deps.get_engine()
     async with engine.begin() as conn:
         row = (await conn.execute(select(Project).where(Project.id == project_id))).fetchone()
         if row is None:
@@ -160,7 +156,7 @@ async def update_project(project_id: uuid.UUID, body: UpdateProjectRequest,
 async def archive_project(project_id: uuid.UUID, user: dict = Depends(_require_owner_async)):
     """归档项目（owner/admin）+ 取消所有任务调度。"""
     from sqlalchemy import select, update, text
-    engine = _get_engine()
+    engine = deps.get_engine()
     async with engine.begin() as conn:
         row = (await conn.execute(select(Project).where(Project.id == project_id))).fetchone()
         if row is None:
@@ -169,7 +165,7 @@ async def archive_project(project_id: uuid.UUID, user: dict = Depends(_require_o
         task_ids = [r.id for r in (await conn.execute(
             text("SELECT id FROM docupipe_manager.tasks WHERE project_id = :pid"), {"pid": str(project_id)}
         )).fetchall()]
-    from docupipe_manager.main import app
+    scheduler = deps.get_scheduler()
     for tid in task_ids:
-        await app.state.scheduler.unschedule_task(tid)
+        await scheduler.unschedule_task(tid)
     return {"status": "archived"}

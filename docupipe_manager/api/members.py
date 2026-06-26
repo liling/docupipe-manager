@@ -3,7 +3,8 @@ import uuid
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
-from docupipe_manager.api.projects import _require_access_async, _require_owner_async, _get_engine
+from docupipe_manager import deps
+from docupipe_manager.api.projects import _require_access_async, _require_owner_async
 from docupipe_manager.models.project_member import MemberRole, ProjectMember
 
 router = APIRouter(prefix="/api/projects/{project_id}/members", tags=["members"])
@@ -28,8 +29,7 @@ def _resolve_user(info: dict | None) -> dict:
 
 
 async def _fetch_users(user_ids: list[str]) -> dict[str, dict]:
-    from docupipe_manager.main import app
-    cache = app.state.user_cache
+    cache = deps.get_user_cache()
     uuids = [uuid.UUID(uid) for uid in user_ids]
     miss_ids: list[uuid.UUID] = []
     result: dict[str, dict] = {}
@@ -41,7 +41,7 @@ async def _fetch_users(user_ids: list[str]) -> dict[str, dict]:
             miss_ids.append(uid)
     if miss_ids:
         try:
-            fetched = await app.state.platform_client.batch_get_users(miss_ids)
+            fetched = await deps.get_platform_client().batch_get_users(miss_ids)
             for uid, info in fetched.items():
                 if info is not None:
                     cache.set(uid, info)
@@ -57,7 +57,7 @@ async def _fetch_users(user_ids: list[str]) -> dict[str, dict]:
 @router.get("")
 async def list_members(project_id: uuid.UUID, user: dict = Depends(_require_access_async)):
     from sqlalchemy import text
-    engine = _get_engine()
+    engine = deps.get_engine()
     async with engine.begin() as conn:
         members = (await conn.execute(text("""
             SELECT user_id, role, created_at FROM docupipe_manager.project_members
@@ -82,7 +82,7 @@ async def list_members(project_id: uuid.UUID, user: dict = Depends(_require_acce
 async def add_member(project_id: uuid.UUID, body: AddMemberRequest,
                      user: dict = Depends(_require_owner_async)):
     from sqlalchemy import insert, select
-    engine = _get_engine()
+    engine = deps.get_engine()
     async with engine.begin() as conn:
         existing = (await conn.execute(
             select(ProjectMember).where(
@@ -107,11 +107,10 @@ users_router = APIRouter(prefix="/api/users", tags=["users"])
 
 @users_router.get("/search")
 async def search_platform_users(q: str = ""):
-    from docupipe_manager.main import app
     if not q.strip():
         return []
     try:
-        return await app.state.platform_client.search_users(q.strip())
+        return await deps.get_platform_client().search_users(q.strip())
     except Exception:
         return []
 
@@ -120,7 +119,7 @@ async def search_platform_users(q: str = ""):
 async def remove_member(project_id: uuid.UUID, user_id: uuid.UUID,
                         user: dict = Depends(_require_owner_async)):
     from sqlalchemy import delete, select
-    engine = _get_engine()
+    engine = deps.get_engine()
     async with engine.begin() as conn:
         existing = (await conn.execute(
             select(ProjectMember).where(
@@ -144,7 +143,7 @@ async def update_member_role(project_id: uuid.UUID, user_id: uuid.UUID,
                              body: UpdateRoleRequest,
                              user: dict = Depends(_require_owner_async)):
     from sqlalchemy import select
-    engine = _get_engine()
+    engine = deps.get_engine()
     async with engine.begin() as conn:
         existing = (await conn.execute(
             select(ProjectMember).where(

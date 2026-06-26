@@ -206,7 +206,8 @@ async def test_do_execute_flushes_and_broadcasts_each_line(runner_service, tmp_p
 
     # --- decrypt / subprocess mocks ---
     with patch("docupipe_manager.services.runner_service.decrypt_sm4", return_value="auth"), \
-         patch("docupipe_manager.services.runner_service.mkdtemp", return_value=str(tmp_path)), \
+         patch("tempfile.mkstemp", return_value=(os.open(os.devnull, os.O_RDONLY),
+                                                  os.path.join(str(tmp_path), "auth.b64"))), \
          patch("asyncio.create_subprocess_exec", new=AsyncMock()) as mock_sub:
         proc1 = MagicMock()
         proc1.communicate = AsyncMock(return_value=(b"", b""))
@@ -282,7 +283,8 @@ async def test_do_execute_truncates_log_file_at_max_bytes(runner_service, tmp_pa
     lines = [b"this-is-a-long-line-XX\n"] * 20
 
     with patch("docupipe_manager.services.runner_service.decrypt_sm4", return_value="auth"), \
-         patch("docupipe_manager.services.runner_service.mkdtemp", return_value=str(home_dir)), \
+         patch("tempfile.mkstemp", return_value=(os.open(os.devnull, os.O_RDONLY),
+                                                     os.path.join(str(home_dir), "auth.b64"))), \
          patch("asyncio.create_subprocess_exec", new=AsyncMock()) as mock_sub:
         proc1 = MagicMock()
         proc1.communicate = AsyncMock(return_value=(b"", b""))
@@ -352,8 +354,7 @@ async def test_do_execute_runs_without_credential(runner_service, tmp_path):
     runner_service._session_factory = fake_factory
     runner_service._settings.data_dir = str(tmp_path)
 
-    with patch("docupipe_manager.services.runner_service.mkdtemp", return_value=str(tmp_path)), \
-         patch("asyncio.create_subprocess_exec", new=AsyncMock()) as mock_sub:
+    with patch("asyncio.create_subprocess_exec", new=AsyncMock()) as mock_sub:
         proc = MagicMock()
         proc.stdout.readline = AsyncMock(side_effect=[b"hello\n", b""])
         proc.wait = AsyncMock(return_value=0)
