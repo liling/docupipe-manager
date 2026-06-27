@@ -56,3 +56,23 @@ def test_dws_credential_has_credential_type():
     cols = DwsCredential.__table__.columns
     assert "credential_type" in cols
     assert cols["credential_type"].default is not None
+
+
+def test_job_model_has_required_columns():
+    from docupipe_manager.models.job import Job
+    cols = {c.name for c in Job.__table__.columns}
+    assert {"id", "kind", "status", "pid", "exit_code", "started_at",
+            "completed_at", "log_path", "command_text", "error_message",
+            "trigger_type", "credential_id", "created_at"} <= cols
+
+
+def test_job_kind_enum_values():
+    from docupipe_manager.models.job import JobKind, JobStatus, JobTriggerType
+    assert {k.value for k in JobKind} == {"docupipe_run", "credential_keepalive"}
+    assert {k.value for k in JobStatus} == {"pending", "running", "succeeded", "failed", "cancelled"}
+    assert {k.value for k in JobTriggerType} == {"manual", "scheduled"}
+
+
+def test_job_credential_id_nullable():
+    from docupipe_manager.models.job import Job
+    assert Job.__table__.columns["credential_id"].nullable is True
