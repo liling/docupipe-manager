@@ -355,6 +355,7 @@ class CredentialService:
         started_at = datetime.now(timezone.utc)
 
         try:
+            await self._ensure_dws_state()
             async with self._dws_lock:
                 fd, tmp_import = tempfile.mkstemp(suffix=".b64", prefix="dws-keepalive-")
                 os.close(fd)
@@ -365,7 +366,7 @@ class CredentialService:
                     rc, _, _ = await self._run_dws(["auth", "import", "--base64", "-i", tmp_import],
                                                    log_path=log_path)
                     if rc != 0:
-                        raise RuntimeError(f"dws auth import failed (exit {rc})")
+                        raise CredentialError(f"dws auth import failed (exit {rc})")
 
                     async with self._session_factory() as session:
                         await session.execute(update(Job).where(Job.id == job.id).values(
@@ -374,7 +375,7 @@ class CredentialService:
 
                     rc, _, _ = await self._run_dws(["wiki", "space", "list"], log_path=log_path)
                     if rc != 0:
-                        raise RuntimeError(f"dws wiki space list failed (exit {rc})")
+                        raise CredentialError(f"dws wiki space list failed (exit {rc})")
 
                     rc, status_out, _ = await self._run_dws(["auth", "status", "--format", "json"],
                                                             log_path=log_path)
@@ -385,7 +386,7 @@ class CredentialService:
                     rc, _, _ = await self._run_dws(["auth", "export", "--base64", "-o", tmp_export],
                                                    log_path=log_path)
                     if rc != 0 or not os.path.exists(tmp_export):
-                        raise RuntimeError("dws auth export failed")
+                        raise CredentialError("dws auth export failed")
                     with open(tmp_export, "r") as f:
                         new_blob = f.read().strip()
                     os.unlink(tmp_export)
@@ -394,7 +395,10 @@ class CredentialService:
                         os.unlink(tmp_import)
                     except OSError:
                         pass
-                    await self._run_dws(["auth", "logout"])
+                    try:
+                        await self._run_dws(["auth", "logout"])
+                    except Exception:
+                        pass
 
             new_blob_hex = encrypt_sm4(new_blob, key_hex)
             token_exp = _parse_dt(meta.get("expires_at"))
