@@ -256,11 +256,9 @@ async def test_probe_auth_blob_uses_isolated_env(credential_service):
     import_call = next(c for a, c in calls if "import" in a)
     assert import_call.kwargs["env"]["DWS_DISABLE_KEYCHAIN"] == "1"
     assert "DWS_CONFIG_DIR" in import_call.kwargs["env"]
-
-
-def test_credential_service_has_no_dws_lock(credential_service):
-    assert not hasattr(credential_service, "_dws_lock")
 ```
+
+> 注：`_dws_lock` 字段在 Task 4 才删除；`test_credential_service_has_no_dws_lock` 因此放在 Task 4 一并新增，避免本任务提交一个必然失败的测试。
 
 - [ ] **Step 2: 跑测试确认失败**
 
@@ -322,7 +320,7 @@ from docupipe_manager.services.dws_env import isolated_dws_env
 - [ ] **Step 4: 暂不删 `_dws_lock`（Task 4 一起删），先让 probe 测试过；跑 probe 相关测试**
 
 Run: `pytest tests/services/test_credential_service.py -k "probe" -v`
-Expected: `test_probe_auth_blob_uses_isolated_env` PASS；`test_probe_auth_blob_invalid_base64`、`test_probe_auth_blob_import_fails` 仍 PASS（mock 不关心 logout 是否被调）。`test_credential_service_has_no_dws_lock` 仍 FAIL（下个 task 删字段）。
+Expected: `test_probe_auth_blob_uses_isolated_env` PASS；`test_probe_auth_blob_invalid_base64`、`test_probe_auth_blob_import_fails` 仍 PASS（mock 不关心 logout 是否被调）。
 
 - [ ] **Step 5: 提交**
 
@@ -347,11 +345,15 @@ git commit -m "refactor: _probe_auth_blob uses isolated dws env, drops logout"
 
 删除 `tests/services/test_credential_service.py` 中 `test_ensure_dws_state_already_exists`（276-278）与 `test_ensure_dws_state_bootstraps`（281-290）两个函数整体。
 
-- [ ] **Step 2: 写新失败测试（断言 refresh 用隔离 env、不调 logout/ensure）**
+- [ ] **Step 2: 写新失败测试（断言 refresh 用隔离 env、不调 logout/ensure；`_dws_lock` 已删）**
 
 在文件末尾追加：
 
 ```python
+def test_credential_service_has_no_dws_lock(credential_service):
+    assert not hasattr(credential_service, "_dws_lock")
+
+
 @pytest.mark.asyncio
 async def test_refresh_credential_uses_isolated_env(credential_service, tmp_path):
     from docupipe_manager.models.dws_credential import CredentialStatus
