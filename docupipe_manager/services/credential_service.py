@@ -255,11 +255,17 @@ class CredentialService:
             finally:
                 os.unlink(import_path)
 
-    async def _run_dws(self, args: list[str], log_path: str | None = None,
+    async def _run_dws(self, args: list[str], env: dict[str, str] | None = None,
+                       log_path: str | None = None,
                        timeout: float = 120.0) -> tuple[int, bytes, bytes]:
+        kwargs: dict = {
+            "stdout": asyncio.subprocess.PIPE,
+            "stderr": asyncio.subprocess.PIPE,
+        }
+        if env is not None:
+            kwargs["env"] = env
         proc = await asyncio.create_subprocess_exec(
-            self._settings.dws_cli_path, *args,
-            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+            self._settings.dws_cli_path, *args, **kwargs,
         )
         try:
             stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout)

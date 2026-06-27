@@ -395,3 +395,15 @@ async def test_refresh_credential_api_failure_marks_job_failed(credential_servic
 
     assert cred.status == CredentialStatus.active
     assert any(getattr(a, "kind", None) == JobKind.credential_keepalive for a in added)
+
+
+@pytest.mark.asyncio
+async def test_run_dws_passes_env_when_given(credential_service):
+    proc = AsyncMock()
+    proc.communicate = AsyncMock(return_value=(b"{}", b""))
+    proc.returncode = 0
+    env = {"HOME": "/tmp/x", "DWS_DISABLE_KEYCHAIN": "1", "PATH": "/usr/bin"}
+    with patch("docupipe_manager.services.credential_service.asyncio.create_subprocess_exec",
+               AsyncMock(return_value=proc)) as mock_exec:
+        await credential_service._run_dws(["auth", "status"], env=env)
+    assert mock_exec.call_args.kwargs["env"] is env
