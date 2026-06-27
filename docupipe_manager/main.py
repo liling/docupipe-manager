@@ -89,8 +89,8 @@ async def lifespan(app: FastAPI):
     user_cache = UserLRUCache(ttl_seconds=settings.user_cache_ttl_seconds)
 
     runner = RunnerService(engine, settings, platform_client)
-    scheduler = SchedulerService(runner, engine, settings)
     credential = CredentialService(engine, settings, platform_client)
+    scheduler = SchedulerService(runner, credential, engine, settings)
 
     await scheduler.start()
 
