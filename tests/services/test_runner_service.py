@@ -51,6 +51,7 @@ async def test_start_run_creates_run_with_task_id(runner_service):
 async def test_start_run_creates_job_and_pipeline_run(runner_service):
     """start_run 同时创建 Job(共享 id) 和 PipelineRun(job_id=run.id)。"""
     from docupipe_manager.models.job import Job, JobKind, JobTriggerType
+    from docupipe_manager.models.pipeline_run import PipelineRun
     task_id = uuid.uuid4()
     added = []
     with patch.object(runner_service, "_session_factory") as mock_sf:
@@ -68,31 +69,29 @@ async def test_start_run_creates_job_and_pipeline_run(runner_service):
     assert job.id == run.id                       # 共享 id
     assert job.kind == JobKind.docupipe_run
     assert job.trigger_type.value == "manual"
-    run_obj = next(a for a in added if type(a).__name__ == "PipelineRun")
+    run_obj = next(a for a in added if isinstance(a, PipelineRun))
     assert run_obj.job_id == run.id
 
 
 @pytest.mark.asyncio
 async def test_finalize_run_preserves_job_log_path(runner_service):
     """_finalize_run 写入 Job 时不应清空 log_path（之前 _do_execute 已写入）。"""
-    from sqlalchemy.sql.dml import Update
-    from docupipe_manager.models.job import Job
     rid = uuid.uuid4()
-    job_update_values = []
+    compiled_stmts = []
     with patch.object(runner_service, "_session_factory") as mock_sf:
         ms = AsyncMock(); ms.__aenter__ = AsyncMock(return_value=ms); ms.__aexit__ = AsyncMock(return_value=None)
         ms.commit = AsyncMock()
         async def fake_exec(stmt, *a, **kw):
-            if isinstance(stmt, Update) and stmt.table.name == "jobs":
-                job_update_values.append(stmt._values)
+            compiled_stmts.append(str(stmt.compile()))
             return None
         ms.execute = fake_exec
         mock_sf.return_value = ms
         await runner_service._finalize_run(rid, 0, None, uuid.uuid4())
-    assert job_update_values, "expected a Job update in _finalize_run"
-    for vals in job_update_values:
-        # log_path 不得在 values 中（即不得覆写为 NULL，保留 _do_execute 阶段写入的路径）
-        assert "log_path" not in vals, f"_finalize_run clobbered Job.log_path: {vals}"
+    job_updates = [c for c in compiled_stmts if "UPDATE" in c and ".jobs" in c]
+    assert job_updates, "expected a Job update in _finalize_run"
+    for compiled in job_updates:
+        # log_path 不得出现在 SET 子句中（即不得覆写为 NULL，保留 _do_execute 阶段写入的路径）
+        assert "log_path" not in compiled, f"_finalize_run clobbered Job.log_path: {compiled}"
 
 
 @pytest.mark.asyncio
