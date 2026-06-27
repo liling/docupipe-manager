@@ -9,7 +9,7 @@ import uuid
 from datetime import datetime, timezone
 from tempfile import mkdtemp
 
-from docupipe_manager.services.dws_env import isolated_dws_env
+from docupipe_manager.services.dws_env import isolated_dws_env, make_dws_env
 
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker
@@ -51,15 +51,14 @@ class CredentialService:
     async def start_device_login(self, project_id: uuid.UUID, name: str) -> dict:
         """Start dws auth login --device, return verification_url + user_code + session_key."""
         session_key = uuid.uuid4().hex
-        home_dir = mkdtemp(prefix="dws-device-")
-        os.makedirs(os.path.join(home_dir, "Library", "Keychains"), exist_ok=True)
+        root = mkdtemp(prefix="dws-device-")
+        env = make_dws_env(root)
 
         proc = await asyncio.create_subprocess_exec(
             self._settings.dws_cli_path, "auth", "login", "--device",
             "--format", "json",
             stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
-            env={**os.environ, "HOME": home_dir},
-            cwd=home_dir,
+            env=env, cwd=root,
         )
 
         try:
@@ -67,12 +66,13 @@ class CredentialService:
             info = json.loads(first_chunk)
         except Exception as e:
             proc.kill()
-            shutil.rmtree(home_dir, ignore_errors=True)
+            shutil.rmtree(root, ignore_errors=True)
             raise ValueError(f"Failed to start device login: {e}") from e
 
         self._active_sessions[session_key] = {
             "proc": proc,
-            "home_dir": home_dir,
+            "root": root,
+            "env": env,
             "name": name,
             "project_id": project_id,
             "created_at": time.monotonic(),
@@ -110,13 +110,14 @@ class CredentialService:
         session = self._active_sessions.get(session_key)
         if session is None:
             raise ValueError("Session not found or expired")
-        home_dir = session["home_dir"]
+        env = session["env"]
+        root = session["root"]
 
         try:
             status_proc = await asyncio.create_subprocess_exec(
                 self._settings.dws_cli_path, "auth", "status", "--format", "json",
                 stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
-                env={**os.environ, "HOME": home_dir},
+                env=env,
             )
             stdout, _ = await status_proc.communicate()
             status_data = json.loads(stdout.decode()) if stdout else {}
@@ -124,11 +125,11 @@ class CredentialService:
             token_expires_at_str = status_data.get("expires_at")
             refresh_expires_at_str = status_data.get("refresh_expires_at")
 
-            export_path = os.path.join(home_dir, "dws-export.b64")
+            export_path = os.path.join(root, "dws-export.b64")
             export_proc = await asyncio.create_subprocess_exec(
                 self._settings.dws_cli_path, "auth", "export", "--base64", "-o", export_path,
                 stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
-                env={**os.environ, "HOME": home_dir},
+                env=env,
             )
             await export_proc.communicate()
             if export_proc.returncode != 0 or not os.path.exists(export_path):
@@ -436,7 +437,7 @@ class CredentialService:
             proc = session.get("proc")
             if proc and proc.returncode is None:
                 proc.kill()
-            shutil.rmtree(session.get("home_dir", ""), ignore_errors=True)
+            shutil.rmtree(session.get("root", ""), ignore_errors=True)
 
     async def cleanup_expired_sessions(self) -> None:
         """Remove device login sessions older than 15 minutes."""

@@ -117,7 +117,11 @@ async def test_create_from_import_invalid_blob(credential_service):
 async def test_finalize_login_persists_expires(credential_service):
     """finalize 应把 status 返回的过期时间存入 DwsCredential（回归现有写死 None 的 bug）。"""
     pid = uuid.uuid4(); uid = uuid.uuid4()
-    session_obj = {"home_dir": "/tmp/fake-home", "name": "n", "project_id": pid}
+    session_obj = {"root": "/tmp/fake-home",
+                   "env": {"HOME": "/tmp/fake-home", "DWS_DISABLE_KEYCHAIN": "1",
+                           "DWS_CONFIG_DIR": "/tmp/fake-home/dws-config",
+                           "DWS_CACHE_DIR": "/tmp/fake-home/dws-cache", "PATH": "/usr/bin"},
+                   "name": "n", "project_id": pid}
 
     status_proc = AsyncMock()
     status_proc.communicate = AsyncMock(
@@ -422,6 +426,25 @@ async def test_probe_auth_blob_uses_isolated_env(credential_service):
 
 def test_credential_service_has_no_dws_lock(credential_service):
     assert not hasattr(credential_service, "_dws_lock")
+
+
+@pytest.mark.asyncio
+async def test_start_device_login_uses_isolated_env(credential_service):
+    pid = uuid.uuid4()
+    proc = AsyncMock()
+    proc.stdout.readline = AsyncMock(return_value=b'{"verification_url":"http://x","user_code":"ABC"}')
+    with patch("docupipe_manager.services.credential_service.asyncio.create_subprocess_exec",
+               AsyncMock(return_value=proc)) as mock_exec, \
+         patch("docupipe_manager.services.credential_service.mkdtemp",
+               return_value="/tmp/dws-device-FAKE"):
+        result = await credential_service.start_device_login(pid, "n")
+    kw = mock_exec.call_args.kwargs
+    assert kw["env"]["DWS_DISABLE_KEYCHAIN"] == "1"
+    assert kw["env"]["DWS_CONFIG_DIR"] == "/tmp/dws-device-FAKE/dws-config"
+    assert kw["cwd"] == "/tmp/dws-device-FAKE"
+    sess = credential_service._active_sessions[result["session_key"]]
+    assert sess["root"] == "/tmp/dws-device-FAKE"
+    assert sess["env"]["DWS_DISABLE_KEYCHAIN"] == "1"
 
 
 @pytest.mark.asyncio
