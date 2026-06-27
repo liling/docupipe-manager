@@ -76,3 +76,24 @@ def test_job_kind_enum_values():
 def test_job_credential_id_nullable():
     from docupipe_manager.models.job import Job
     assert Job.__table__.columns["credential_id"].nullable is True
+
+
+def test_keepalive_config_defaults():
+    from docupipe_manager.config import Settings
+    import os
+    orig = {}
+    for k in ("DOCUPIPE_MANAGER_DATABASE_URL", "DOCUPIPE_MANAGER_ENCRYPTION_KEY", "DOCUPIPE_MANAGER_JWT_SECRET"):
+        orig[k] = os.environ.pop(k, None)
+    os.environ["DOCUPIPE_MANAGER_DATABASE_URL"] = "sqlite+aiosqlite:///test.db"
+    os.environ["DOCUPIPE_MANAGER_ENCRYPTION_KEY"] = "a" * 32
+    os.environ["DOCUPIPE_MANAGER_JWT_SECRET"] = "b" * 32
+    try:
+        s = Settings()
+    finally:
+        for k, v in orig.items():
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
+    assert s.credential_keepalive_enabled is True
+    assert s.credential_keepalive_cron == "0 3 * * *"
