@@ -40,7 +40,7 @@ async def test_start_run_creates_run_with_task_id(runner_service):
         mock_session.add = MagicMock()
         mock_session.commit = AsyncMock()
         with patch.object(runner_service, "_execute_run", new=AsyncMock()):
-            run = await runner_service.start_run(
+            run, _ = await runner_service.start_run(
                 task_id=task_id, trigger_type="manual", triggered_by=uuid.uuid4(),
             )
             assert run.task_id == task_id
@@ -59,7 +59,7 @@ async def test_start_run_creates_job_and_pipeline_run(runner_service):
         ms.commit = AsyncMock(); ms.refresh = AsyncMock()
         mock_sf.return_value = ms
         with patch.object(runner_service, "_execute_run", new=AsyncMock()):
-            run = await runner_service.start_run(
+            run, _ = await runner_service.start_run(
                 task_id=task_id, trigger_type="manual", triggered_by=uuid.uuid4(),
             )
     kinds = [type(a).__name__ for a in added]

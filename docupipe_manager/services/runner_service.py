@@ -89,7 +89,7 @@ class RunnerService:
         triggered_by: uuid.UUID | None,
         pipeline_name: str | None = None,
         mode: str = "incremental",
-    ) -> PipelineRun:
+    ) -> tuple[PipelineRun, Job]:
         run_id = uuid.uuid4()
         job = Job(
             id=run_id,
@@ -113,7 +113,7 @@ class RunnerService:
             await session.refresh(run)
 
         asyncio.create_task(self._execute_run(run.id))
-        return run
+        return run, job
 
     async def cancel_run(self, run_id: uuid.UUID) -> None:
         async with self._session_factory() as session:
