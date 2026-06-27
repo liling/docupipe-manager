@@ -70,6 +70,7 @@ async def test_cancel_run(async_client):
     run_id = uuid.uuid4()
     run_mock = MagicMock()
     run_mock.task_id = uuid.uuid4()
+    job_mock = MagicMock()
     override_get_current_user({"id": str(uuid.uuid4()), "role": "admin"})
     with (
         patch("docupipe_manager.deps.get_engine") as mock_get_engine,
@@ -77,7 +78,7 @@ async def test_cancel_run(async_client):
     ):
         mock_conn = AsyncMock()
         mock_conn.execute = AsyncMock(return_value=MagicMock(
-            one_or_none=MagicMock(return_value=run_mock)
+            one_or_none=MagicMock(return_value=(run_mock, job_mock))
         ))
         mock_engine = MagicMock()
         mock_engine.begin.return_value.__aenter__ = AsyncMock(return_value=mock_conn)
@@ -96,21 +97,23 @@ async def test_cancel_run(async_client):
 @pytest.mark.asyncio
 async def test_get_run_includes_command_and_task_name(async_client):
     rid = uuid.uuid4()
+    job_mock = MagicMock()
+    job_mock.id = rid
+    job_mock.command_text = "python -m docupipe run"
+    job_mock.log_path = "/tmp/x.log"
+    job_mock.exit_code = 0
+    job_mock.status = "succeeded"
+    job_mock.started_at = None
+    job_mock.completed_at = None
+    job_mock.error_message = None
+    job_mock.trigger_type = "manual"
+    job_mock.triggered_by = None
+    job_mock.created_at = "2026-06-23"
     run_mock = MagicMock()
     run_mock.id = rid
     run_mock.task_id = uuid.uuid4()
-    run_mock.trigger_type = "manual"
-    run_mock.triggered_by = None
     run_mock.pipeline_name = None
     run_mock.mode = "incremental"
-    run_mock.status = "succeeded"
-    run_mock.exit_code = 0
-    run_mock.started_at = None
-    run_mock.completed_at = None
-    run_mock.command_text = "python -m docupipe run"
-    run_mock.log_path = "/tmp/x.log"
-    run_mock.error_message = None
-    run_mock.created_at = "2026-06-23"
     task_mock = MagicMock()
     task_mock.name = "demo-task"
     task_mock.project_id = uuid.uuid4()
@@ -119,9 +122,9 @@ async def test_get_run_includes_command_and_task_name(async_client):
     with patch("docupipe_manager.deps.get_engine") as mock_get_engine:
         mock_conn = AsyncMock()
         mock_conn.execute = AsyncMock(side_effect=[
-            MagicMock(one_or_none=MagicMock(return_value=run_mock)),  # access
-            MagicMock(one_or_none=MagicMock(return_value=run_mock)),  # detail run
-            MagicMock(one_or_none=MagicMock(return_value=task_mock)), # detail task
+            MagicMock(one_or_none=MagicMock(return_value=(run_mock, job_mock))),  # access
+            MagicMock(one_or_none=MagicMock(return_value=(run_mock, job_mock))),  # detail
+            MagicMock(one_or_none=MagicMock(return_value=task_mock)),
         ])
         mock_engine = MagicMock()
         mock_engine.begin.return_value.__aenter__ = AsyncMock(return_value=mock_conn)
@@ -146,18 +149,20 @@ async def test_stream_completed_run_reads_file(async_client, tmp_path):
     run_mock = MagicMock()
     run_mock.id = rid
     run_mock.task_id = uuid.uuid4()
-    run_mock.trigger_type = "manual"
-    run_mock.triggered_by = None
     run_mock.pipeline_name = None
     run_mock.mode = "incremental"
-    run_mock.status = "succeeded"
-    run_mock.exit_code = 0
-    run_mock.command_text = "cmd"
-    run_mock.started_at = None
-    run_mock.completed_at = None
-    run_mock.log_path = str(log_file)
-    run_mock.error_message = None
-    run_mock.created_at = "2026-06-23"
+    job_mock = MagicMock()
+    job_mock.id = rid
+    job_mock.trigger_type = "manual"
+    job_mock.triggered_by = None
+    job_mock.status = "succeeded"
+    job_mock.exit_code = 0
+    job_mock.command_text = "cmd"
+    job_mock.started_at = None
+    job_mock.completed_at = None
+    job_mock.log_path = str(log_file)
+    job_mock.error_message = None
+    job_mock.created_at = "2026-06-23"
     task_mock = MagicMock()
     task_mock.name = "t"
     task_mock.project_id = uuid.uuid4()
@@ -169,10 +174,10 @@ async def test_stream_completed_run_reads_file(async_client, tmp_path):
     ):
         mock_conn = AsyncMock()
         mock_conn.execute = AsyncMock(side_effect=[
-            MagicMock(one_or_none=MagicMock(return_value=run_mock)),  # access
-            MagicMock(one_or_none=MagicMock(return_value=run_mock)),  # detail(meta)
+            MagicMock(one_or_none=MagicMock(return_value=(run_mock, job_mock))),  # access
+            MagicMock(one_or_none=MagicMock(return_value=(run_mock, job_mock))),  # detail(meta)
             MagicMock(one_or_none=MagicMock(return_value=task_mock)),
-            MagicMock(one_or_none=MagicMock(return_value=run_mock)),  # detail(end)
+            MagicMock(one_or_none=MagicMock(return_value=(run_mock, job_mock))),  # detail(end)
             MagicMock(one_or_none=MagicMock(return_value=task_mock)),
         ])
         mock_engine = MagicMock()
@@ -198,18 +203,20 @@ async def test_stream_active_run_replays_history_then_live_then_end(async_client
     run_mock = MagicMock()
     run_mock.id = rid
     run_mock.task_id = uuid.uuid4()
-    run_mock.trigger_type = "manual"
-    run_mock.triggered_by = None
     run_mock.pipeline_name = None
     run_mock.mode = "incremental"
-    run_mock.status = "running"
-    run_mock.exit_code = None
-    run_mock.command_text = "cmd"
-    run_mock.started_at = None
-    run_mock.completed_at = None
-    run_mock.log_path = "/tmp/x.log"
-    run_mock.error_message = None
-    run_mock.created_at = "2026-06-23"
+    job_mock = MagicMock()
+    job_mock.id = rid
+    job_mock.trigger_type = "manual"
+    job_mock.triggered_by = None
+    job_mock.status = "running"
+    job_mock.exit_code = None
+    job_mock.command_text = "cmd"
+    job_mock.started_at = None
+    job_mock.completed_at = None
+    job_mock.log_path = "/tmp/x.log"
+    job_mock.error_message = None
+    job_mock.created_at = "2026-06-23"
     task_mock = MagicMock()
     task_mock.name = "t"
     task_mock.project_id = uuid.uuid4()
@@ -225,10 +232,10 @@ async def test_stream_active_run_replays_history_then_live_then_end(async_client
     ):
         mock_conn = AsyncMock()
         mock_conn.execute = AsyncMock(side_effect=[
-            MagicMock(one_or_none=MagicMock(return_value=run_mock)),  # access
-            MagicMock(one_or_none=MagicMock(return_value=run_mock)),  # detail(meta)
+            MagicMock(one_or_none=MagicMock(return_value=(run_mock, job_mock))),  # access
+            MagicMock(one_or_none=MagicMock(return_value=(run_mock, job_mock))),  # detail(meta)
             MagicMock(one_or_none=MagicMock(return_value=task_mock)),
-            MagicMock(one_or_none=MagicMock(return_value=run_mock)),  # detail(end)
+            MagicMock(one_or_none=MagicMock(return_value=(run_mock, job_mock))),  # detail(end)
             MagicMock(one_or_none=MagicMock(return_value=task_mock)),
         ])
         mock_engine = MagicMock()
