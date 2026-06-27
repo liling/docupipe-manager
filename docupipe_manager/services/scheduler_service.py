@@ -1,4 +1,6 @@
+import asyncio
 import logging
+import random
 import uuid
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -105,6 +107,9 @@ class SchedulerService:
             pass
 
     async def _scheduled_keepalive(self, credential_id: uuid.UUID) -> None:
+        jitter = self._settings.credential_keepalive_jitter_seconds
+        if jitter > 0:
+            await asyncio.sleep(random.uniform(0, jitter))
         async with self._session_factory() as session:
             cred = await session.get(DwsCredential, credential_id)
             if cred is None or cred.status != CredentialStatus.active:

@@ -97,3 +97,4 @@ def test_keepalive_config_defaults():
                 os.environ[k] = v
     assert s.credential_keepalive_enabled is True
     assert s.credential_keepalive_cron == "0 3 * * *"
+    assert s.credential_keepalive_jitter_seconds == 300

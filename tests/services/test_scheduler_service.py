@@ -17,6 +17,7 @@ def scheduler_service():
     settings = MagicMock()
     settings.credential_keepalive_enabled = True
     settings.credential_keepalive_cron = "0 3 * * *"
+    settings.credential_keepalive_jitter_seconds = 0
     return SchedulerService(runner, credential, engine, settings)
 
 
@@ -154,3 +155,39 @@ async def test_reload_all_registers_keepalive_jobs(scheduler_service):
         mock_sf.return_value = ms
         await scheduler_service._reload_all()
     assert scheduler_service._scheduler.get_job(f"keepalive-{cid}") is not None
+
+
+@pytest.mark.asyncio
+async def test_scheduled_keepalive_applies_jitter(scheduler_service):
+    from docupipe_manager.models.dws_credential import CredentialStatus
+    scheduler_service._settings.credential_keepalive_jitter_seconds = 300
+    cred_mock = MagicMock()
+    cred_mock.status = CredentialStatus.active
+    with patch.object(scheduler_service, "_session_factory") as mock_sf, \
+         patch("docupipe_manager.services.scheduler_service.asyncio.sleep", new=AsyncMock()) as mock_sleep, \
+         patch("docupipe_manager.services.scheduler_service.random.uniform", return_value=42.0) as mock_uniform:
+        ms = AsyncMock()
+        ms.__aenter__.return_value = ms
+        ms.get = AsyncMock(return_value=cred_mock)
+        mock_sf.return_value = ms
+        await scheduler_service._scheduled_keepalive(uuid.uuid4())
+    mock_uniform.assert_called_once_with(0, 300)
+    mock_sleep.assert_awaited_once_with(42.0)
+    scheduler_service._credential.refresh_credential.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_scheduled_keepalive_no_sleep_when_jitter_zero(scheduler_service):
+    from docupipe_manager.models.dws_credential import CredentialStatus
+    scheduler_service._settings.credential_keepalive_jitter_seconds = 0
+    cred_mock = MagicMock()
+    cred_mock.status = CredentialStatus.active
+    with patch.object(scheduler_service, "_session_factory") as mock_sf, \
+         patch("docupipe_manager.services.scheduler_service.asyncio.sleep", new=AsyncMock()) as mock_sleep:
+        ms = AsyncMock()
+        ms.__aenter__.return_value = ms
+        ms.get = AsyncMock(return_value=cred_mock)
+        mock_sf.return_value = ms
+        await scheduler_service._scheduled_keepalive(uuid.uuid4())
+    mock_sleep.assert_not_awaited()
+    scheduler_service._credential.refresh_credential.assert_awaited_once()
