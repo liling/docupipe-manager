@@ -407,3 +407,31 @@ async def test_run_dws_passes_env_when_given(credential_service):
                AsyncMock(return_value=proc)) as mock_exec:
         await credential_service._run_dws(["auth", "status"], env=env)
     assert mock_exec.call_args.kwargs["env"] is env
+
+
+@pytest.mark.asyncio
+async def test_probe_auth_blob_uses_isolated_env(credential_service):
+    """import 子进程应收到隔离 env（含 DWS_DISABLE_KEYCHAIN），且不再调 logout。"""
+    import_proc = AsyncMock(); import_proc.returncode = 0
+    import_proc.communicate = AsyncMock(return_value=(b"", b""))
+    status_proc = AsyncMock(); status_proc.returncode = 0
+    status_proc.communicate = AsyncMock(return_value=(b'{"corp_id":"c"}', b""))
+    calls = []
+
+    async def fake_exec(*args, **kwargs):
+        calls.append((args, kwargs))
+        if "import" in args:
+            return import_proc
+        return status_proc
+
+    with patch("docupipe_manager.services.credential_service.asyncio.create_subprocess_exec",
+               side_effect=fake_exec):
+        meta = await credential_service._probe_auth_blob("YWJjZGVm")  # 合法 base64
+
+    assert meta == {"corp_id": "c"}
+    # 没有 logout 子进程
+    assert not any("logout" in a[0] for a in calls)
+    # import 子进程拿到了隔离 env
+    import_call = next(c for a, c in calls if "import" in a)
+    assert import_call["env"]["DWS_DISABLE_KEYCHAIN"] == "1"
+    assert "DWS_CONFIG_DIR" in import_call["env"]

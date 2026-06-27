@@ -10,6 +10,8 @@ from datetime import datetime, timezone
 from tempfile import mkdtemp
 import tempfile
 
+from docupipe_manager.services.dws_env import isolated_dws_env
+
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker
 
@@ -205,55 +207,44 @@ class CredentialService:
         return credential
 
     async def _probe_auth_blob(self, auth_b64: str) -> dict:
-        """import base64 凭证 + status 探测，返回元数据。使用真实 HOME 保证 macOS 钥匙串可访问。
-        base64 非法 / import 失败抛 ValueError。
-        串行锁 _dws_lock 避免多个进程同时操作真实 HOME 的 ~/.dws 状态。"""
+        """import base64 凭证到隔离 env，调 status 返回元数据。
+        base64 非法 / import 失败抛 ValueError。"""
         try:
             binascii.a2b_base64(auth_b64.encode("utf-8"))
         except (binascii.Error, ValueError) as e:
             raise ValueError(f"auth_blob 不是合法的 base64: {e}") from e
 
-        async with self._dws_lock:
-            fd, import_path = tempfile.mkstemp(suffix=".b64", prefix="dws-auth-")
-            os.close(fd)
+        with isolated_dws_env() as env:
+            import_path = os.path.join(env["HOME"], "auth.b64")
+            with open(import_path, "w") as f:
+                f.write(auth_b64)
+
+            import_proc = await asyncio.create_subprocess_exec(
+                self._settings.dws_cli_path, "auth", "import", "--base64", "-i", import_path,
+                stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE, env=env,
+            )
             try:
-                with open(import_path, "w") as f:
-                    f.write(auth_b64)
+                stdout, stderr = await asyncio.wait_for(import_proc.communicate(), timeout=30)
+            except asyncio.TimeoutError:
+                import_proc.kill()
+                raise ValueError("dws auth import 超时")
+            if import_proc.returncode != 0:
+                detail = stderr.decode().strip() if stderr else ""
+                msg = "dws auth import 失败：凭证无效"
+                if detail:
+                    msg += f"（{detail}）"
+                raise ValueError(msg)
 
-                logout_proc = await asyncio.create_subprocess_exec(
-                    self._settings.dws_cli_path, "auth", "logout",
-                    stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
-                )
-                await logout_proc.communicate()
-
-                import_proc = await asyncio.create_subprocess_exec(
-                    self._settings.dws_cli_path, "auth", "import", "--base64", "-i", import_path,
-                    stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
-                )
-                try:
-                    stdout, stderr = await asyncio.wait_for(import_proc.communicate(), timeout=30)
-                except asyncio.TimeoutError:
-                    import_proc.kill()
-                    raise ValueError("dws auth import 超时")
-                if import_proc.returncode != 0:
-                    detail = stderr.decode().strip() if stderr else ""
-                    msg = "dws auth import 失败：凭证无效"
-                    if detail:
-                        msg += f"（{detail}）"
-                    raise ValueError(msg)
-
-                status_proc = await asyncio.create_subprocess_exec(
-                    self._settings.dws_cli_path, "auth", "status", "--format", "json",
-                    stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
-                )
-                try:
-                    stdout, _ = await asyncio.wait_for(status_proc.communicate(), timeout=30)
-                except asyncio.TimeoutError:
-                    status_proc.kill()
-                    raise ValueError("dws auth status 超时")
-                return json.loads(stdout.decode()) if stdout else {}
-            finally:
-                os.unlink(import_path)
+            status_proc = await asyncio.create_subprocess_exec(
+                self._settings.dws_cli_path, "auth", "status", "--format", "json",
+                stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE, env=env,
+            )
+            try:
+                stdout, _ = await asyncio.wait_for(status_proc.communicate(), timeout=30)
+            except asyncio.TimeoutError:
+                status_proc.kill()
+                raise ValueError("dws auth status 超时")
+            return json.loads(stdout.decode()) if stdout else {}
 
     async def _run_dws(self, args: list[str], env: dict[str, str] | None = None,
                        log_path: str | None = None,
