@@ -24,8 +24,8 @@
 ## File Structure
 
 - **Create** `docupipe_manager/models/job.py` — Job 模型 + JobKind/JobStatus/JobTriggerType 枚举
-- **Create** `docupipe_manager/migrations/versions/0006_create_jobs_and_backfill.py` — 建 jobs 表 + 枚举 + 回填 + pipeline_runs.job_id
-- **Create** `docupipe_manager/migrations/versions/0007_drop_moved_run_columns.py` — 删除 pipeline_runs 已搬迁列
+- **Create** `docupipe_manager/migrations/versions/0007_create_jobs_and_backfill.py` — 建 jobs 表 + 枚举 + 回填 + pipeline_runs.job_id（`revision="0007"`, `down_revision="0006"`；`0006_owner_as_member` 已存在）
+- **Create** `docupipe_manager/migrations/versions/0008_drop_moved_run_columns.py` — 删除 pipeline_runs 已搬迁列（`revision="0008"`, `down_revision="0007"`）
 - **Modify** `docupipe_manager/models/__init__.py` — 导出 Job 系列
 - **Modify** `docupipe_manager/models/pipeline_run.py` — 瘦身（Task 3）
 - **Modify** `docupipe_manager/services/runner_service.py` — 写 Job、读 Job
@@ -39,11 +39,11 @@
 
 ---
 
-### Task 1: Job 模型 + 枚举 + 迁移 0006（建表+回填+job_id）
+### Task 1: Job 模型 + 枚举 + 迁移 0007（建表+回填+job_id）
 
 **Files:**
 - Create: `docupipe_manager/models/job.py`
-- Create: `docupipe_manager/migrations/versions/0006_create_jobs_and_backfill.py`
+- Create: `docupipe_manager/migrations/versions/0007_create_jobs_and_backfill.py`
 - Modify: `docupipe_manager/models/__init__.py`
 - Test: `tests/unit/test_models.py`
 
@@ -161,23 +161,23 @@ from docupipe_manager.models.job import Job, JobKind, JobStatus, JobTriggerType
 Run: `pytest tests/unit/test_models.py -v`
 Expected: PASS
 
-- [ ] **Step 6: 写迁移 0006**
+- [ ] **Step 6: 写迁移 0007**
 
-`docupipe_manager/migrations/versions/0006_create_jobs_and_backfill.py`：
+`docupipe_manager/migrations/versions/0007_create_jobs_and_backfill.py`：
 
 ```python
 """Create jobs table, backfill from pipeline_runs, add pipeline_runs.job_id.
 
-Revision ID: 0006
-Revises: 0005
+Revision ID: 0007
+Revises: 0006
 Create Date: 2026-06-27
 """
 from typing import Sequence, Union
 
 from alembic import op
 
-revision: str = "0006"
-down_revision: Union[str, None] = "0005"
+revision: str = "0007"
+down_revision: Union[str, None] = "0006"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
@@ -250,9 +250,9 @@ def downgrade() -> None:
 
 ```bash
 git add docupipe_manager/models/job.py docupipe_manager/models/__init__.py \
-        docupipe_manager/migrations/versions/0006_create_jobs_and_backfill.py \
+        docupipe_manager/migrations/versions/0007_create_jobs_and_backfill.py \
         tests/unit/test_models.py
-git commit -m "feat: add Job model and migration 0006 (create+backfill+job_id)"
+git commit -m "feat: add Job model and migration 0007 (create+backfill+job_id)"
 ```
 
 ---
@@ -713,10 +713,10 @@ git commit -m "refactor: run read-path and startup SQL switch to Job as source o
 
 ---
 
-### Task 4: 删除 pipeline_runs 已搬迁列（迁移 0007 + 模型瘦身 + 清理双写）
+### Task 4: 删除 pipeline_runs 已搬迁列（迁移 0008 + 模型瘦身 + 清理双写）
 
 **Files:**
-- Create: `docupipe_manager/migrations/versions/0007_drop_moved_run_columns.py`
+- Create: `docupipe_manager/migrations/versions/0008_drop_moved_run_columns.py`
 - Modify: `docupipe_manager/models/pipeline_run.py`
 - Modify: `docupipe_manager/services/runner_service.py`（移除 PipelineRun 侧的执行字段写入）
 - Modify: `tests/unit/test_pipeline_run_model.py`
@@ -748,23 +748,23 @@ def test_pipeline_run_job_id_not_nullable():
 Run: `pytest tests/unit/test_pipeline_run_model.py -v`
 Expected: FAIL（command_text 等列还在）
 
-- [ ] **Step 3: 写迁移 0007**
+- [ ] **Step 3: 写迁移 0008**
 
-`docupipe_manager/migrations/versions/0007_drop_moved_run_columns.py`：
+`docupipe_manager/migrations/versions/0008_drop_moved_run_columns.py`：
 
 ```python
 """Drop execution columns moved from pipeline_runs to jobs.
 
-Revision ID: 0007
-Revises: 0006
+Revision ID: 0008
+Revises: 0007
 Create Date: 2026-06-27
 """
 from typing import Sequence, Union
 
 from alembic import op
 
-revision: str = "0007"
-down_revision: Union[str, None] = "0006"
+revision: str = "0008"
+down_revision: Union[str, None] = "0007"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
@@ -834,8 +834,11 @@ class PipelineRun(Base):
 - [ ] **Step 5: 清理 runner 的 PipelineRun 侧写入（去双写）**
 
 在 `runner_service.py`：
-- `start_run`：`PipelineRun(...)` 构造去掉 status/trigger_type/triggered_by（只留 id/job_id/task_id/pipeline_name/mode）。删去 `from ... import RunStatus`。
+- `start_run`：`PipelineRun(...)` 构造去掉 status/trigger_type/triggered_by（只留 id/job_id/task_id/pipeline_name/mode）。
+- 删除 `from docupipe_manager.models.pipeline_run import ... RunStatus`；改为 `from docupipe_manager.models.job import Job, JobKind, JobStatus, JobTriggerType`（Job 等已在 Task 2 引入；此步只去掉 RunStatus）。
 - `_stream_subprocess`、`_finalize_run`、`_mark_run_failed`、`_do_execute` 里所有 `update(PipelineRun)...` 执行字段写入**删除**（只留 Job 的 update）。
+- `_finalize_run` 中局部变量 `status` 改用 `JobStatus` 计算：把原 `status = RunStatus.succeeded if exit_code == 0 else RunStatus.failed` 改为 `job_status = JobStatus.succeeded if exit_code == 0 else JobStatus.failed`，其下 Job update 的 `status=JobStatus(status.value)` 改为 `status=job_status`。
+- `_mark_run_failed` 的 Job update `status=JobStatus.failed` 不变（已是 JobStatus）。
 - `cancel_run`：改为读 Job 判定状态（不再依赖 PipelineRun.status）：
 
 ```python
@@ -882,7 +885,7 @@ Expected: PASS
 
 ```bash
 git add docupipe_manager/models/pipeline_run.py docupipe_manager/models/__init__.py \
-        docupipe_manager/migrations/versions/0007_drop_moved_run_columns.py \
+        docupipe_manager/migrations/versions/0008_drop_moved_run_columns.py \
         docupipe_manager/services/runner_service.py \
         tests/unit/test_pipeline_run_model.py tests/services/test_runner_service.py
 git commit -m "refactor: slim PipelineRun to task binding; execution state lives on Job"
@@ -1492,6 +1495,14 @@ Expected: FAIL（钩子未调）
         return {"status": "revoked"}
 ```
 
+**同步修现有测试**：`test_import_credential`、`test_finalize_device_login`、`test_revoke_credential` 三个测试未 mock `deps.get_scheduler`（conftest 里它是裸 `MagicMock`），加 hook 后 `await MagicMock().schedule_keepalive(...)` 会 TypeError。每个测试的 `with (...)` 块追加一个 patch 和 mock 赋值：
+
+- `test_import_credential`：追加 `patch("docupipe_manager.deps.get_scheduler") as mock_get_scheduler`，并在 mock 块内设 `mock_get_scheduler.return_value.schedule_keepalive = AsyncMock()`。
+- `test_finalize_device_login`：同上（`schedule_keepalive`）。
+- `test_revoke_credential`：追加 `patch("docupipe_manager.deps.get_scheduler") as mock_get_scheduler`，设 `mock_get_scheduler.return_value.unschedule_keepalive = AsyncMock()`。
+
+其余 6 个端点测试（`test_list_credentials` / `test_start_device_login` / `test_poll_device_login` / `test_test_endpoint` / `test_rename_credential` 等）不调 hook，**不需改动**。`test_import_credential_invalid` / `test_revoke_credential_404` 在 raise 分支提前返回，**不需改动**。
+
 - [ ] **Step 4: 跑测试**
 
 Run: `pytest tests/api/test_credentials.py -v`
@@ -1515,7 +1526,7 @@ git commit -m "feat: wire credential create/revoke to keepalive schedule hooks"
 
 **1. Spec coverage（对照 spec 各节）：**
 - 数据模型 Job/枚举/共享 id → Task 1（建）、Task 4（PipelineRun 瘦身）。✓
-- 迁移 0006 回填 + job_id → Task 1；0007 删列 → Task 4。✓（spec 写单迁移 0006，plan 拆 0006/0007 保绿，等价且更安全。）
+- 迁移 0007 回填 + job_id → Task 1；0008 删列 → Task 4。✓（`0006_owner_as_member` 已存在于 master，分支新迁移编为 0007/0008；spec 写 0006，plan 顺延。等价且更安全。）
 - SchedulerService 泛化（schedule/unschedule/reload/_scheduled_keepalive + 注入 credential_service）→ Task 6。✓
 - CredentialService.refresh_credential（真实 HOME、_dws_lock、Job 记录、失败不改 status）→ Task 7。✓
 - Runner 适配 Job → Task 2/4。✓
@@ -1531,5 +1542,5 @@ git commit -m "feat: wire credential create/revoke to keepalive schedule hooks"
 
 **4. 已知执行期风险（写入 spec 风险节，执行时留意）：**
 - `dws wiki space list` 是否真触发刷新需集成验证（Task 7 mock 无法验证）。
-- 迁移 0006 回填依赖 pipeline_runs 现有列与 jobs 列名一一对应；上线前在 dump 上跑一次。
+- 迁移 0007 回填依赖 pipeline_runs 现有列与 jobs 列名一一对应；上线前在 dump 上跑一次。
 - Task 4 Step 6 runner 测试 mock 调整量较大，按实际 pytest 输出收敛。

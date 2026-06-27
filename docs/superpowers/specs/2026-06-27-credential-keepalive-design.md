@@ -98,9 +98,9 @@ class Job(Base):
 
 > 关系：1 个 PipelineRun 恰好对应 1 个 Job（kind=docupipe_run）。保活不建 PipelineRun，直接建 Job（kind=credential_keepalive + credential_id）。
 
-### 迁移 `0006_extract_job.py`
+### 迁移 `0007_create_jobs_and_backfill.py`
 
-`revision = "0006"`，`down_revision = "0005"`。手写幂等 raw SQL（项目惯例，不依赖 autogenerate）：
+`revision = "0007"`，`down_revision = "0006"`（`0006_owner_as_member` 已存在于 master；新分支顺延为 0007/0008）。手写幂等 raw SQL（项目惯例，不依赖 autogenerate）：
 
 1. 建枚举类型 `docupipe_manager.job_kind`(`docupipe_run`,`credential_keepalive`)、`job_status`(同 run_status 值)、`job_trigger_type`(同 run_trigger_type 值)。
 2. 建 `docupipe_manager.jobs` 表（含 `credential_id` FK `ON DELETE SET NULL`）。
