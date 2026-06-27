@@ -71,7 +71,7 @@ async def test_start_run_creates_job_and_pipeline_run(runner_service):
     run_obj = next(a for a in added if isinstance(a, PipelineRun))
     assert run_obj.job_id == run.id
     # PipelineRun 无执行字段：不设 status/pid/exit_code/command_text 等
-    assert not hasattr(run_obj, "status") or not hasattr(PipelineRun, "status")
+    assert not hasattr(PipelineRun, "status")
 
 
 @pytest.mark.asyncio
