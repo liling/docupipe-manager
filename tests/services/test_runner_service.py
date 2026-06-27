@@ -48,6 +48,31 @@ async def test_start_run_creates_run_with_task_id(runner_service):
 
 
 @pytest.mark.asyncio
+async def test_start_run_creates_job_and_pipeline_run(runner_service):
+    """start_run 同时创建 Job(共享 id) 和 PipelineRun(job_id=run.id)。"""
+    from docupipe_manager.models.job import Job, JobKind, JobTriggerType
+    task_id = uuid.uuid4()
+    added = []
+    with patch.object(runner_service, "_session_factory") as mock_sf:
+        ms = AsyncMock(); ms.__aenter__.return_value = ms
+        ms.add = MagicMock(side_effect=lambda obj: added.append(obj))
+        ms.commit = AsyncMock(); ms.refresh = AsyncMock()
+        mock_sf.return_value = ms
+        with patch.object(runner_service, "_execute_run", new=AsyncMock()):
+            run = await runner_service.start_run(
+                task_id=task_id, trigger_type="manual", triggered_by=uuid.uuid4(),
+            )
+    kinds = [type(a).__name__ for a in added]
+    assert "PipelineRun" in kinds and "Job" in kinds
+    job = next(a for a in added if isinstance(a, Job))
+    assert job.id == run.id                       # 共享 id
+    assert job.kind == JobKind.docupipe_run
+    assert job.trigger_type.value == "manual"
+    run_obj = next(a for a in added if type(a).__name__ == "PipelineRun")
+    assert run_obj.job_id == run.id
+
+
+@pytest.mark.asyncio
 async def test_cancel_pending_run(runner_service):
     run_mock = MagicMock()
     run_mock.status = RunStatus.pending
@@ -67,7 +92,9 @@ async def test_mark_run_failed(runner_service):
         mock_session.execute = AsyncMock()
         mock_session.commit = AsyncMock()
         await runner_service._mark_run_failed(uuid.uuid4(), "err")
-        mock_session.execute.assert_awaited_once()
+        # Task 2 dual-writes: PipelineRun + Job updates in the same session.
+        assert mock_session.execute.await_count == 2
+        assert mock_session.commit.await_count == 1
 
 
 @pytest.mark.asyncio

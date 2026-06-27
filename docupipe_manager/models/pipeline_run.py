@@ -28,6 +28,9 @@ class PipelineRun(Base):
     __tablename__ = "pipeline_runs"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID, primary_key=True, default=uuid.uuid4)
+    job_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID, ForeignKey(f"{_SCHEMA}.jobs.id", ondelete="CASCADE"), nullable=True,
+    )
     task_id: Mapped[uuid.UUID] = mapped_column(
         UUID, ForeignKey(f"{_SCHEMA}.tasks.id", ondelete="CASCADE"), nullable=False
     )

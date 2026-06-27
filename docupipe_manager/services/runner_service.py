@@ -15,6 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker
 from docupipe_manager.config import Settings
 from docupipe_manager.crypto import decrypt_sm4
 from docupipe_manager.models.dws_credential import DwsCredential
+from docupipe_manager.models.job import Job, JobKind, JobStatus, JobTriggerType
 from docupipe_manager.models.pipeline_run import PipelineRun, RunStatus
 from docupipe_manager.models.project_env_var import ProjectEnvVar
 from docupipe_manager.models.task import CredentialType, Task
@@ -89,15 +90,27 @@ class RunnerService:
         pipeline_name: str | None = None,
         mode: str = "incremental",
     ) -> PipelineRun:
-        run = PipelineRun(
-            task_id=task_id,
-            trigger_type=trigger_type,
+        run_id = uuid.uuid4()
+        job = Job(
+            id=run_id,
+            kind=JobKind.docupipe_run,
+            status=JobStatus.pending,
+            trigger_type=JobTriggerType(trigger_type),
             triggered_by=triggered_by,
+            command_text=None,
+        )
+        run = PipelineRun(
+            id=run_id,
+            job_id=run_id,
+            task_id=task_id,
             pipeline_name=pipeline_name,
             mode=mode,
             status=RunStatus.pending,
+            trigger_type=trigger_type,
+            triggered_by=triggered_by,
         )
         async with self._session_factory() as session:
+            session.add(job)
             session.add(run)
             await session.commit()
             await session.refresh(run)
@@ -113,6 +126,9 @@ class RunnerService:
 
             if run.status == RunStatus.pending:
                 run.status = RunStatus.cancelled
+                await session.execute(
+                    update(Job).where(Job.id == run_id).values(status=JobStatus.cancelled)
+                )
                 await session.commit()
             elif run.status == RunStatus.running and run.pid:
                 try:
@@ -120,6 +136,9 @@ class RunnerService:
                 except ProcessLookupError:
                     pass
                 run.status = RunStatus.cancelled
+                await session.execute(
+                    update(Job).where(Job.id == run_id).values(status=JobStatus.cancelled, pid=None)
+                )
                 await session.commit()
 
     async def _execute_run(self, run_id: uuid.UUID) -> None:
@@ -237,6 +256,11 @@ class RunnerService:
             await session.execute(
                 update(PipelineRun).where(PipelineRun.id == run_id).values(pid=proc.pid)
             )
+            await session.execute(
+                update(Job).where(Job.id == run_id).values(
+                    pid=proc.pid, status=JobStatus.running, started_at=datetime.now(timezone.utc),
+                )
+            )
             await session.commit()
 
         max_bytes = self._settings.run_log_max_bytes
@@ -279,6 +303,12 @@ class RunnerService:
                     completed_at=completed_at,
                     error_message=error_message,
                     pid=None,
+                )
+            )
+            await session.execute(
+                update(Job).where(Job.id == run_id).values(
+                    status=JobStatus(status.value), exit_code=exit_code, completed_at=completed_at,
+                    error_message=error_message, pid=None, log_path=None,  # log_path 留待读端切后再迁移
                 )
             )
             await session.commit()
@@ -328,6 +358,12 @@ class RunnerService:
                         command_text=command_text,
                     )
                 )
+                await session.execute(
+                    update(Job).where(Job.id == run_id).values(
+                        status=JobStatus.running, started_at=started_at,
+                        log_path=log_path, command_text=command_text,
+                    )
+                )
                 await session.commit()
 
             exit_code, error_message = await self._stream_subprocess(
@@ -359,6 +395,12 @@ class RunnerService:
                     update(PipelineRun).where(PipelineRun.id == run_id).values(
                         status=RunStatus.failed,
                         error_message=error_message[:2048],
+                        completed_at=datetime.now(timezone.utc),
+                    )
+                )
+                await session.execute(
+                    update(Job).where(Job.id == run_id).values(
+                        status=JobStatus.failed, error_message=error_message[:2048],
                         completed_at=datetime.now(timezone.utc),
                     )
                 )
