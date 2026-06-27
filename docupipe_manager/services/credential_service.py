@@ -8,7 +8,6 @@ import time
 import uuid
 from datetime import datetime, timezone
 from tempfile import mkdtemp
-import tempfile
 
 from docupipe_manager.services.dws_env import isolated_dws_env
 
@@ -48,7 +47,6 @@ class CredentialService:
         self._platform_client = platform_client
         self._session_factory = async_sessionmaker(engine, expire_on_commit=False)
         self._active_sessions: dict[str, dict] = {}
-        self._dws_lock = asyncio.Lock()
 
     async def start_device_login(self, project_id: uuid.UUID, name: str) -> dict:
         """Start dws auth login --device, return verification_url + user_code + session_key."""
@@ -272,17 +270,6 @@ class CredentialService:
                 pass
         return proc.returncode, stdout, stderr
 
-    async def _ensure_dws_state(self) -> None:
-        state_path = os.path.join(os.environ.get("HOME", "/root"), ".dws", "dws-state.json")
-        if os.path.exists(state_path):
-            return
-        try:
-            rc, _, _ = await self._run_dws(["wiki", "space", "list"])
-            if rc != 0:
-                logger.warning("dws wiki space list returned %d during state bootstrap", rc)
-        except Exception:
-            logger.warning("Failed to bootstrap dws state", exc_info=True)
-
     async def check_status(self, credential_id: uuid.UUID, project_id: uuid.UUID) -> dict:
         """测试凭证可用性并回写最新 corp_id/过期时间/status。"""
         async with self._session_factory() as db_session:
@@ -352,50 +339,35 @@ class CredentialService:
         started_at = datetime.now(timezone.utc)
 
         try:
-            await self._ensure_dws_state()
-            async with self._dws_lock:
-                fd, tmp_import = tempfile.mkstemp(suffix=".b64", prefix="dws-keepalive-")
-                os.close(fd)
-                try:
-                    with open(tmp_import, "w") as f:
-                        f.write(auth_b64)
-                    await self._run_dws(["auth", "logout"])
-                    rc, _, _ = await self._run_dws(["auth", "import", "--base64", "-i", tmp_import],
-                                                   log_path=log_path)
-                    if rc != 0:
-                        raise CredentialError(f"dws auth import failed (exit {rc})")
+            with isolated_dws_env() as env:
+                import_path = os.path.join(env["HOME"], "auth.b64")
+                with open(import_path, "w") as f:
+                    f.write(auth_b64)
+                rc, _, _ = await self._run_dws(["auth", "import", "--base64", "-i", import_path],
+                                               env=env, log_path=log_path)
+                if rc != 0:
+                    raise CredentialError(f"dws auth import failed (exit {rc})")
 
-                    async with self._session_factory() as session:
-                        await session.execute(update(Job).where(Job.id == job.id).values(
-                            status=JobStatus.running, started_at=started_at, log_path=log_path))
-                        await session.commit()
+                async with self._session_factory() as session:
+                    await session.execute(update(Job).where(Job.id == job.id).values(
+                        status=JobStatus.running, started_at=started_at, log_path=log_path))
+                    await session.commit()
 
-                    rc, _, _ = await self._run_dws(["wiki", "space", "list"], log_path=log_path)
-                    if rc != 0:
-                        raise CredentialError(f"dws wiki space list failed (exit {rc})")
+                rc, _, _ = await self._run_dws(["wiki", "space", "list"], env=env, log_path=log_path)
+                if rc != 0:
+                    raise CredentialError(f"dws wiki space list failed (exit {rc})")
 
-                    rc, status_out, _ = await self._run_dws(["auth", "status", "--format", "json"],
-                                                            log_path=log_path)
-                    meta = json.loads(status_out.decode()) if status_out else {}
+                rc, status_out, _ = await self._run_dws(["auth", "status", "--format", "json"],
+                                                        env=env, log_path=log_path)
+                meta = json.loads(status_out.decode()) if status_out else {}
 
-                    fd2, tmp_export = tempfile.mkstemp(suffix=".b64", prefix="dws-keepalive-export-")
-                    os.close(fd2)
-                    rc, _, _ = await self._run_dws(["auth", "export", "--base64", "-o", tmp_export],
-                                                   log_path=log_path)
-                    if rc != 0 or not os.path.exists(tmp_export):
-                        raise CredentialError("dws auth export failed")
-                    with open(tmp_export, "r") as f:
-                        new_blob = f.read().strip()
-                    os.unlink(tmp_export)
-                finally:
-                    try:
-                        os.unlink(tmp_import)
-                    except OSError:
-                        pass
-                    try:
-                        await self._run_dws(["auth", "logout"])
-                    except Exception:
-                        pass
+                export_path = os.path.join(env["HOME"], "export.b64")
+                rc, _, _ = await self._run_dws(["auth", "export", "--base64", "-o", export_path],
+                                               env=env, log_path=log_path)
+                if rc != 0 or not os.path.exists(export_path):
+                    raise CredentialError("dws auth export failed")
+                with open(export_path, "r") as f:
+                    new_blob = f.read().strip()
 
             new_blob_hex = encrypt_sm4(new_blob, key_hex)
             token_exp = _parse_dt(meta.get("expires_at"))
