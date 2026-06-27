@@ -5,12 +5,10 @@ Requires: a portable auth blob exported with DWS_DISABLE_KEYCHAIN=1, path in
 env DOCUPIPE_TEST_DWS_BLOB. Skips if not provided.
 """
 import os
-import shutil
-import uuid
 
 import pytest
 
-from docupipe_manager.services.dws_env import isolated_dws_env, make_dws_env
+from docupipe_manager.services.dws_env import isolated_dws_env
 
 pytestmark = [pytest.mark.integration]
 
