@@ -15,7 +15,8 @@ from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker
 from docupipe_manager.config import Settings
 from docupipe_manager.crypto import decrypt_sm4
 from docupipe_manager.models.dws_credential import DwsCredential
-from docupipe_manager.models.pipeline_run import PipelineRun, RunStatus
+from docupipe_manager.models.job import Job, JobKind, JobStatus, JobTriggerType
+from docupipe_manager.models.pipeline_run import PipelineRun
 from docupipe_manager.models.project_env_var import ProjectEnvVar
 from docupipe_manager.models.task import CredentialType, Task
 from docupipe_manager.platform.client import XinyiPlatformClient
@@ -88,38 +89,47 @@ class RunnerService:
         triggered_by: uuid.UUID | None,
         pipeline_name: str | None = None,
         mode: str = "incremental",
-    ) -> PipelineRun:
-        run = PipelineRun(
-            task_id=task_id,
-            trigger_type=trigger_type,
+    ) -> tuple[PipelineRun, Job]:
+        run_id = uuid.uuid4()
+        job = Job(
+            id=run_id,
+            kind=JobKind.docupipe_run,
+            status=JobStatus.pending,
+            trigger_type=JobTriggerType(trigger_type),
             triggered_by=triggered_by,
+            command_text=None,
+        )
+        run = PipelineRun(
+            id=run_id,
+            job_id=run_id,
+            task_id=task_id,
             pipeline_name=pipeline_name,
             mode=mode,
-            status=RunStatus.pending,
         )
         async with self._session_factory() as session:
+            session.add(job)
             session.add(run)
             await session.commit()
             await session.refresh(run)
 
         asyncio.create_task(self._execute_run(run.id))
-        return run
+        return run, job
 
     async def cancel_run(self, run_id: uuid.UUID) -> None:
         async with self._session_factory() as session:
-            run = await session.get(PipelineRun, run_id)
-            if run is None:
+            job = await session.get(Job, run_id)
+            if job is None:
                 raise ValueError("Run not found")
-
-            if run.status == RunStatus.pending:
-                run.status = RunStatus.cancelled
+            if job.status == JobStatus.pending:
+                job.status = JobStatus.cancelled
                 await session.commit()
-            elif run.status == RunStatus.running and run.pid:
+            elif job.status == JobStatus.running and job.pid:
                 try:
-                    os.kill(run.pid, signal.SIGTERM)
+                    os.kill(job.pid, signal.SIGTERM)
                 except ProcessLookupError:
                     pass
-                run.status = RunStatus.cancelled
+                job.status = JobStatus.cancelled
+                job.pid = None
                 await session.commit()
 
     async def _execute_run(self, run_id: uuid.UUID) -> None:
@@ -235,7 +245,9 @@ class RunnerService:
         )
         async with self._session_factory() as session:
             await session.execute(
-                update(PipelineRun).where(PipelineRun.id == run_id).values(pid=proc.pid)
+                update(Job).where(Job.id == run_id).values(
+                    pid=proc.pid, status=JobStatus.running, started_at=datetime.now(timezone.utc),
+                )
             )
             await session.commit()
 
@@ -269,21 +281,18 @@ class RunnerService:
         error_message: str | None, task_id: uuid.UUID,
     ) -> None:
         completed_at = datetime.now(timezone.utc)
-        status = RunStatus.succeeded if exit_code == 0 else RunStatus.failed
+        job_status = JobStatus.succeeded if exit_code == 0 else JobStatus.failed
 
         async with self._session_factory() as session:
             await session.execute(
-                update(PipelineRun).where(PipelineRun.id == run_id).values(
-                    status=status,
-                    exit_code=exit_code,
-                    completed_at=completed_at,
-                    error_message=error_message,
-                    pid=None,
+                update(Job).where(Job.id == run_id).values(
+                    status=job_status, exit_code=exit_code, completed_at=completed_at,
+                    error_message=error_message, pid=None,
                 )
             )
             await session.commit()
 
-        event = f"docupipe.run.{'success' if status == RunStatus.succeeded else 'fail'}"
+        event = f"docupipe.run.{'success' if job_status == JobStatus.succeeded else 'fail'}"
         asyncio.create_task(self._platform_client.push_audit({
             "event": event,
             "run_id": str(run_id),
@@ -321,11 +330,9 @@ class RunnerService:
             started_at = datetime.now(timezone.utc)
             async with self._session_factory() as session:
                 await session.execute(
-                    update(PipelineRun).where(PipelineRun.id == run_id).values(
-                        status=RunStatus.running,
-                        started_at=started_at,
-                        log_path=log_path,
-                        command_text=command_text,
+                    update(Job).where(Job.id == run_id).values(
+                        status=JobStatus.running, started_at=started_at,
+                        log_path=log_path, command_text=command_text,
                     )
                 )
                 await session.commit()
@@ -356,9 +363,8 @@ class RunnerService:
         try:
             async with self._session_factory() as session:
                 await session.execute(
-                    update(PipelineRun).where(PipelineRun.id == run_id).values(
-                        status=RunStatus.failed,
-                        error_message=error_message[:2048],
+                    update(Job).where(Job.id == run_id).values(
+                        status=JobStatus.failed, error_message=error_message[:2048],
                         completed_at=datetime.now(timezone.utc),
                     )
                 )

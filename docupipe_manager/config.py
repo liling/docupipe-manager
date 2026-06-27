@@ -13,6 +13,9 @@ class Settings(BaseSettings):
     run_timeout_seconds: int = 0
     max_concurrent_runs: int = 3
     run_log_max_bytes: int = 10 * 1024 * 1024
+    credential_keepalive_enabled: bool = True
+    credential_keepalive_cron: str = "0 3 * * *"
+    credential_keepalive_jitter_seconds: int = 300
 
     jwt_secret: str
     encryption_key: str = ""

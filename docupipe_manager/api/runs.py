@@ -16,29 +16,31 @@ MAX_TAIL_LINES = 1000
 async def _verify_run_access(run_id: uuid.UUID, user: dict):
     from sqlalchemy import select, text
     from docupipe_manager.models.pipeline_run import PipelineRun
+    from docupipe_manager.models.job import Job
 
     engine = deps.get_engine()
     async with engine.begin() as conn:
-        result = await conn.execute(
-            select(PipelineRun).where(PipelineRun.id == run_id)
-        )
-        run = result.one_or_none()
-    if run is None:
+        row = (await conn.execute(
+            select(PipelineRun, Job).join(Job, PipelineRun.job_id == Job.id)
+            .where(PipelineRun.id == run_id)
+        )).one_or_none()
+    if row is None:
         raise HTTPException(status_code=404, detail="Run not found")
+    run, job = row
 
     if user.get("role") != "admin":
         async with engine.begin() as conn:
-            row = await conn.execute(text("""
+            m = await conn.execute(text("""
                 SELECT 1 FROM docupipe_manager.tasks t
                 JOIN docupipe_manager.projects p ON p.id = t.project_id
                 WHERE t.id = :tid AND p.id IN (
                     SELECT pm.project_id FROM docupipe_manager.project_members pm WHERE pm.user_id = :uid
                 )
             """), {"tid": str(run.task_id), "uid": user["id"]})
-            if not row.fetchone():
+            if not m.fetchone():
                 raise HTTPException(status_code=404, detail="Run not found")
 
-    return run
+    return run, job
 
 
 @router.get("")
@@ -52,6 +54,7 @@ async def list_runs(
 ):
     from sqlalchemy import func, select, text
     from docupipe_manager.models.pipeline_run import PipelineRun
+    from docupipe_manager.models.job import Job
     from docupipe_manager.models.task import Task
     from docupipe_manager.models.project import Project
 
@@ -67,7 +70,7 @@ async def list_runs(
             )
         )
     if status:
-        conditions.append(PipelineRun.status == status)
+        conditions.append(Job.status == status)
 
     offset = (page - 1) * page_size
 
@@ -87,21 +90,33 @@ async def list_runs(
                 return {"total": 0, "page": page, "page_size": page_size, "runs": []}
             conditions.append(PipelineRun.task_id.in_(visible_tasks))
 
-        count_q = select(func.count()).select_from(PipelineRun)
+        count_q = select(func.count()).select_from(PipelineRun).join(
+            Job, PipelineRun.job_id == Job.id
+        )
         if conditions:
             count_q = count_q.where(*conditions)
         total = (await conn.execute(count_q)).scalar() or 0
 
         q = select(
-            PipelineRun,
+            PipelineRun.id.label("id"),
+            PipelineRun.task_id.label("task_id"),
             Task.name.label("task_name"),
             Project.id.label("proj_id"),
             Project.name.label("project_name"),
+            PipelineRun.pipeline_name.label("pipeline_name"),
+            PipelineRun.mode.label("mode"),
+            Job.trigger_type.label("trigger_type"),
+            Job.status.label("status"),
+            Job.started_at.label("started_at"),
+            Job.completed_at.label("completed_at"),
+            Job.created_at.label("created_at"),
+        ).select_from(PipelineRun).join(
+            Job, PipelineRun.job_id == Job.id
         ).join(
             Task, PipelineRun.task_id == Task.id, isouter=not bool(project_id)
         ).join(
             Project, Task.project_id == Project.id, isouter=True
-        ).order_by(PipelineRun.created_at.desc())
+        ).order_by(Job.created_at.desc())
         if conditions:
             q = q.where(*conditions)
         q = q.offset(offset).limit(page_size)
@@ -134,21 +149,25 @@ async def list_runs(
 async def _run_detail(run_id: uuid.UUID) -> dict:
     from sqlalchemy import select
     from docupipe_manager.models.pipeline_run import PipelineRun
+    from docupipe_manager.models.job import Job
     from docupipe_manager.models.task import Task
 
     engine = deps.get_engine()
     async with engine.begin() as conn:
-        run = (await conn.execute(
-            select(PipelineRun).where(PipelineRun.id == run_id)
+        row = (await conn.execute(
+            select(PipelineRun, Job).join(Job, PipelineRun.job_id == Job.id)
+            .where(PipelineRun.id == run_id)
         )).one_or_none()
         task = None
-        if run is not None:
+        if row is not None:
+            run, job = row
             task = (await conn.execute(
                 select(Task).where(Task.id == run.task_id)
             )).one_or_none()
 
-    if run is None:
+    if row is None:
         return {}
+    run, job = row
 
     def _v(x):
         return x.value if hasattr(x, "value") else x
@@ -158,18 +177,18 @@ async def _run_detail(run_id: uuid.UUID) -> dict:
         "task_id": str(run.task_id),
         "task_name": task.name if task else None,
         "project_id": str(task.project_id) if task else None,
-        "trigger_type": _v(run.trigger_type),
-        "triggered_by": str(run.triggered_by) if run.triggered_by else None,
+        "trigger_type": _v(job.trigger_type),
+        "triggered_by": str(job.triggered_by) if job.triggered_by else None,
         "pipeline_name": run.pipeline_name,
         "mode": run.mode,
-        "status": _v(run.status),
-        "exit_code": run.exit_code,
-        "command_text": run.command_text,
-        "started_at": str(run.started_at) if run.started_at else None,
-        "completed_at": str(run.completed_at) if run.completed_at else None,
-        "error_message": run.error_message,
-        "log_path": run.log_path,
-        "created_at": str(run.created_at),
+        "status": _v(job.status),
+        "exit_code": job.exit_code,
+        "command_text": job.command_text,
+        "started_at": str(job.started_at) if job.started_at else None,
+        "completed_at": str(job.completed_at) if job.completed_at else None,
+        "error_message": job.error_message,
+        "log_path": job.log_path,
+        "created_at": str(job.created_at),
     }
 
 
@@ -191,13 +210,13 @@ async def get_run_log(
     tail: int = Query(200, ge=1, le=MAX_TAIL_LINES),
     user: dict = Depends(get_current_user),
 ):
-    run = await _verify_run_access(run_id, user)
+    run, job = await _verify_run_access(run_id, user)
 
-    if not run.log_path:
+    if not job.log_path:
         return {"lines": [], "truncated": False, "total_bytes": 0}
 
     try:
-        with open(run.log_path, "r") as f:
+        with open(job.log_path, "r") as f:
             lines = f.readlines()
     except FileNotFoundError:
         raise HTTPException(status_code=404, detail="Log file not found")
@@ -275,12 +294,12 @@ async def download_run_log(
 ):
     from fastapi.responses import FileResponse
 
-    run = await _verify_run_access(run_id, user)
+    run, job = await _verify_run_access(run_id, user)
 
-    if not run.log_path:
+    if not job.log_path:
         raise HTTPException(status_code=404, detail="Log file not found")
 
-    return FileResponse(run.log_path, filename=f"run-{run_id}.log")
+    return FileResponse(job.log_path, filename=f"run-{run_id}.log")
 
 
 @router.post("/{run_id}/cancel")

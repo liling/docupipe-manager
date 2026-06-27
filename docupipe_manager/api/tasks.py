@@ -187,12 +187,12 @@ async def trigger_task(project_id: uuid.UUID, task_id: uuid.UUID, body: TriggerR
         t = (await conn.execute(select(Task).where(Task.id == task_id, Task.project_id == project_id))).fetchone()
         if t is None:
             raise HTTPException(status_code=404, detail="Task not found")
-    run = await deps.get_runner().start_run(
+    run, job = await deps.get_runner().start_run(
         task_id=task_id, trigger_type="manual", triggered_by=uuid.UUID(user["id"]),
         pipeline_name=body.pipeline_name or t.schedule_pipeline,
         mode=body.mode or t.schedule_mode,
     )
-    return {"run_id": str(run.id), "status": run.status.value if hasattr(run.status, "value") else run.status}
+    return {"run_id": str(run.id), "status": job.status.value}
 
 
 def _task_summary(r) -> dict:

@@ -43,7 +43,7 @@ async def lifespan(app: FastAPI):
 
     async with engine.begin() as conn:
         await conn.execute(text(
-            f"UPDATE {settings.manager_schema}.pipeline_runs "
+            f"UPDATE {settings.manager_schema}.jobs "
             "SET status='failed', error_message='process restart' "
             "WHERE status IN ('pending', 'running')"
         ))
@@ -89,8 +89,8 @@ async def lifespan(app: FastAPI):
     user_cache = UserLRUCache(ttl_seconds=settings.user_cache_ttl_seconds)
 
     runner = RunnerService(engine, settings, platform_client)
-    scheduler = SchedulerService(runner, engine, settings)
     credential = CredentialService(engine, settings, platform_client)
+    scheduler = SchedulerService(runner, credential, engine, settings)
 
     await scheduler.start()
 

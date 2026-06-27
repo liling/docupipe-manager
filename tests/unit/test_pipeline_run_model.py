@@ -1,11 +1,11 @@
 from docupipe_manager.models.pipeline_run import PipelineRun
 
 
-def test_pipeline_run_has_command_text_column():
+def test_pipeline_run_keeps_task_binding_and_job_ref():
     cols = {c.name for c in PipelineRun.__table__.columns}
-    assert "command_text" in cols
+    assert {"id", "job_id", "task_id", "pipeline_name", "mode"} == cols
 
 
-def test_pipeline_run_command_text_nullable():
-    col = PipelineRun.__table__.columns["command_text"]
-    assert col.nullable is True
+def test_pipeline_run_job_id_not_nullable():
+    col = PipelineRun.__table__.columns["job_id"]
+    assert col.nullable is False

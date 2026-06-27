@@ -56,3 +56,45 @@ def test_dws_credential_has_credential_type():
     cols = DwsCredential.__table__.columns
     assert "credential_type" in cols
     assert cols["credential_type"].default is not None
+
+
+def test_job_model_has_required_columns():
+    from docupipe_manager.models.job import Job
+    cols = {c.name for c in Job.__table__.columns}
+    assert {"id", "kind", "status", "pid", "exit_code", "started_at",
+            "completed_at", "log_path", "command_text", "error_message",
+            "trigger_type", "credential_id", "created_at"} <= cols
+
+
+def test_job_kind_enum_values():
+    from docupipe_manager.models.job import JobKind, JobStatus, JobTriggerType
+    assert {k.value for k in JobKind} == {"docupipe_run", "credential_keepalive"}
+    assert {k.value for k in JobStatus} == {"pending", "running", "succeeded", "failed", "cancelled"}
+    assert {k.value for k in JobTriggerType} == {"manual", "scheduled"}
+
+
+def test_job_credential_id_nullable():
+    from docupipe_manager.models.job import Job
+    assert Job.__table__.columns["credential_id"].nullable is True
+
+
+def test_keepalive_config_defaults():
+    from docupipe_manager.config import Settings
+    import os
+    orig = {}
+    for k in ("DOCUPIPE_MANAGER_DATABASE_URL", "DOCUPIPE_MANAGER_ENCRYPTION_KEY", "DOCUPIPE_MANAGER_JWT_SECRET"):
+        orig[k] = os.environ.pop(k, None)
+    os.environ["DOCUPIPE_MANAGER_DATABASE_URL"] = "sqlite+aiosqlite:///test.db"
+    os.environ["DOCUPIPE_MANAGER_ENCRYPTION_KEY"] = "a" * 32
+    os.environ["DOCUPIPE_MANAGER_JWT_SECRET"] = "b" * 32
+    try:
+        s = Settings()
+    finally:
+        for k, v in orig.items():
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
+    assert s.credential_keepalive_enabled is True
+    assert s.credential_keepalive_cron == "0 3 * * *"
+    assert s.credential_keepalive_jitter_seconds == 300

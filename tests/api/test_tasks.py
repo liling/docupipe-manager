@@ -98,7 +98,9 @@ async def test_trigger_task_ok(async_client):
     task_id = uuid.uuid4()
     mock_run = MagicMock()
     mock_run.id = uuid.uuid4()
-    mock_run.status = "running"
+    mock_job = MagicMock()
+    from docupipe_manager.models.job import JobStatus
+    mock_job.status = JobStatus.pending
     mock_task_row = MagicMock()
     mock_task_row.schedule_pipeline = None
     mock_task_row.schedule_mode = "incremental"
@@ -112,10 +114,10 @@ async def test_trigger_task_ok(async_client):
         mock_engine.begin.return_value.__aenter__ = AsyncMock(return_value=mock_conn)
         mock_engine.begin.return_value.__aexit__ = AsyncMock(return_value=None)
         mock_get_engine.return_value = mock_engine
-        mock_get_runner.return_value.start_run = AsyncMock(return_value=mock_run)
+        mock_get_runner.return_value.start_run = AsyncMock(return_value=(mock_run, mock_job))
         r = await async_client.post(f"/docupipe/api/projects/{pid}/tasks/{task_id}/trigger", json={})
         assert r.status_code == 200
         data = r.json()
         assert data["run_id"] == str(mock_run.id)
-        assert data["status"] == "running"
+        assert data["status"] == "pending"
     clear_overrides()
