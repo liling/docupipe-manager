@@ -109,7 +109,10 @@ class SchedulerService:
             cred = await session.get(DwsCredential, credential_id)
             if cred is None or cred.status != CredentialStatus.active:
                 return
-        await self._credential.refresh_credential(credential_id)
+        try:
+            await self._credential.refresh_credential(credential_id)
+        except Exception:
+            logger.exception("Keepalive failed for credential %s", credential_id)
 
     async def _reload_all(self) -> None:
         async with self._session_factory() as session:
