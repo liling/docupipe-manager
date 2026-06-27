@@ -1,5 +1,6 @@
 import asyncio
 import json
+import os
 import uuid
 from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock, mock_open, patch
@@ -116,7 +117,11 @@ async def test_create_from_import_invalid_blob(credential_service):
 async def test_finalize_login_persists_expires(credential_service):
     """finalize 应把 status 返回的过期时间存入 DwsCredential（回归现有写死 None 的 bug）。"""
     pid = uuid.uuid4(); uid = uuid.uuid4()
-    session_obj = {"home_dir": "/tmp/fake-home", "name": "n", "project_id": pid}
+    session_obj = {"root": "/tmp/fake-home",
+                   "env": {"HOME": "/tmp/fake-home", "DWS_DISABLE_KEYCHAIN": "1",
+                           "DWS_CONFIG_DIR": "/tmp/fake-home/dws-config",
+                           "DWS_CACHE_DIR": "/tmp/fake-home/dws-cache", "PATH": "/usr/bin"},
+                   "name": "n", "project_id": pid}
 
     status_proc = AsyncMock()
     status_proc.communicate = AsyncMock(
@@ -273,24 +278,6 @@ async def test_run_dws_nonzero_exit(credential_service):
 
 
 @pytest.mark.asyncio
-async def test_ensure_dws_state_already_exists(credential_service):
-    with patch("docupipe_manager.services.credential_service.os.path.exists", return_value=True):
-        await credential_service._ensure_dws_state()
-
-
-@pytest.mark.asyncio
-async def test_ensure_dws_state_bootstraps(credential_service):
-    proc = AsyncMock()
-    proc.communicate = AsyncMock(return_value=(b"[]", b""))
-    proc.returncode = 0
-    with patch("docupipe_manager.services.credential_service.os.path.exists", return_value=False), \
-         patch("docupipe_manager.services.credential_service.asyncio.create_subprocess_exec",
-               AsyncMock(return_value=proc)) as mock_exec:
-        await credential_service._ensure_dws_state()
-    mock_exec.assert_called_once()
-
-
-@pytest.mark.asyncio
 async def test_refresh_credential_success_writes_back(credential_service, tmp_path):
     from docupipe_manager.models.dws_credential import CredentialStatus
     cid = uuid.uuid4()
@@ -395,3 +382,118 @@ async def test_refresh_credential_api_failure_marks_job_failed(credential_servic
 
     assert cred.status == CredentialStatus.active
     assert any(getattr(a, "kind", None) == JobKind.credential_keepalive for a in added)
+
+
+@pytest.mark.asyncio
+async def test_run_dws_passes_env_when_given(credential_service):
+    proc = AsyncMock()
+    proc.communicate = AsyncMock(return_value=(b"{}", b""))
+    proc.returncode = 0
+    env = {"HOME": "/tmp/x", "DWS_DISABLE_KEYCHAIN": "1", "PATH": "/usr/bin"}
+    with patch("docupipe_manager.services.credential_service.asyncio.create_subprocess_exec",
+               AsyncMock(return_value=proc)) as mock_exec:
+        await credential_service._run_dws(["auth", "status"], env=env)
+    assert mock_exec.call_args.kwargs["env"] is env
+
+
+@pytest.mark.asyncio
+async def test_probe_auth_blob_uses_isolated_env(credential_service):
+    """import 子进程应收到隔离 env（含 DWS_DISABLE_KEYCHAIN），且不再调 logout。"""
+    import_proc = AsyncMock(); import_proc.returncode = 0
+    import_proc.communicate = AsyncMock(return_value=(b"", b""))
+    status_proc = AsyncMock(); status_proc.returncode = 0
+    status_proc.communicate = AsyncMock(return_value=(b'{"corp_id":"c"}', b""))
+    calls = []
+
+    async def fake_exec(*args, **kwargs):
+        calls.append((args, kwargs))
+        if "import" in args:
+            return import_proc
+        return status_proc
+
+    with patch("docupipe_manager.services.credential_service.asyncio.create_subprocess_exec",
+               side_effect=fake_exec):
+        meta = await credential_service._probe_auth_blob("YWJjZGVm")  # 合法 base64
+
+    assert meta == {"corp_id": "c"}
+    # 没有 logout 子进程
+    assert not any("logout" in a[0] for a in calls)
+    # import 子进程拿到了隔离 env
+    import_call = next(c for a, c in calls if "import" in a)
+    assert import_call["env"]["DWS_DISABLE_KEYCHAIN"] == "1"
+    assert "DWS_CONFIG_DIR" in import_call["env"]
+
+
+def test_credential_service_has_no_dws_lock(credential_service):
+    assert not hasattr(credential_service, "_dws_lock")
+
+
+@pytest.mark.asyncio
+async def test_start_device_login_uses_isolated_env(credential_service):
+    pid = uuid.uuid4()
+    proc = AsyncMock()
+    proc.stdout.readline = AsyncMock(return_value=b'{"verification_url":"http://x","user_code":"ABC"}')
+    with patch("docupipe_manager.services.credential_service.asyncio.create_subprocess_exec",
+               AsyncMock(return_value=proc)) as mock_exec, \
+         patch("docupipe_manager.services.credential_service.mkdtemp",
+               return_value="/tmp/dws-device-FAKE"):
+        result = await credential_service.start_device_login(pid, "n")
+    kw = mock_exec.call_args.kwargs
+    assert kw["env"]["DWS_DISABLE_KEYCHAIN"] == "1"
+    assert kw["env"]["DWS_CONFIG_DIR"] == "/tmp/dws-device-FAKE/dws-config"
+    assert kw["cwd"] == "/tmp/dws-device-FAKE"
+    sess = credential_service._active_sessions[result["session_key"]]
+    assert sess["root"] == "/tmp/dws-device-FAKE"
+    assert sess["env"]["DWS_DISABLE_KEYCHAIN"] == "1"
+
+
+@pytest.mark.asyncio
+async def test_refresh_credential_uses_isolated_env(credential_service, tmp_path):
+    from docupipe_manager.models.dws_credential import CredentialStatus
+    cid = uuid.uuid4()
+    cred = MagicMock()
+    cred.id = cid; cred.status = CredentialStatus.active
+    cred.auth_blob = b"\x00"; cred.token_expires_at = None; cred.refresh_token_expires_at = None
+
+    sessions = []
+    for _ in range(5):
+        ms = AsyncMock(); ms.__aenter__ = AsyncMock(return_value=ms); ms.__aexit__ = AsyncMock(return_value=None)
+        ms.commit = AsyncMock(); ms.execute = AsyncMock(); ms.refresh = AsyncMock()
+        sessions.append(ms)
+    idx = {"i": 0}
+    def factory():
+        s = sessions[idx["i"]]; idx["i"] += 1; return s
+    credential_service._session_factory = factory
+    sessions[0].get = AsyncMock(return_value=cred)
+    sessions[1].add = MagicMock()
+    sessions[2].get = AsyncMock(return_value=cred)
+    sessions[3].get = AsyncMock(return_value=cred)
+    credential_service._settings.data_dir = str(tmp_path)
+
+    seen_envs = []
+
+    async def fake_exec(*args, **kwargs):
+        seen_envs.append(kwargs.get("env"))
+        proc = AsyncMock(); proc.returncode = 0
+        if "status" in args:
+            proc.communicate = AsyncMock(return_value=(b'{"corp_id":"c","expires_at":"2099-12-31T00:00:00Z","refresh_expires_at":"2099-12-31T00:00:00Z"}', b""))
+        elif "export" in args:
+            proc.communicate = AsyncMock(return_value=(b"", b""))
+        else:
+            proc.communicate = AsyncMock(return_value=(b"out", b""))
+        return proc
+
+    with patch("docupipe_manager.services.credential_service.decrypt_sm4", return_value="b64"), \
+         patch("docupipe_manager.services.credential_service.encrypt_sm4", return_value="deadbeef"), \
+         patch("docupipe_manager.services.credential_service.asyncio.create_subprocess_exec", side_effect=fake_exec), \
+         patch("builtins.open", mock_open()), \
+         patch("docupipe_manager.services.credential_service.os.path.exists", return_value=True), \
+         patch("docupipe_manager.services.credential_service.os.makedirs"):
+        await credential_service.refresh_credential(cid)
+
+    # 没有 logout 子进程
+    assert not hasattr(credential_service, "_dws_lock")
+    # 所有子进程拿到同一个隔离 env（同一 HOME）
+    homes = {e["HOME"] for e in seen_envs if e}
+    assert len(homes) == 1
+    assert next(iter(homes)) != os.environ.get("HOME")

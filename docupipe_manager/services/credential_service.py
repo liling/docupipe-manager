@@ -8,7 +8,8 @@ import time
 import uuid
 from datetime import datetime, timezone
 from tempfile import mkdtemp
-import tempfile
+
+from docupipe_manager.services.dws_env import isolated_dws_env, make_dws_env
 
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker
@@ -46,20 +47,18 @@ class CredentialService:
         self._platform_client = platform_client
         self._session_factory = async_sessionmaker(engine, expire_on_commit=False)
         self._active_sessions: dict[str, dict] = {}
-        self._dws_lock = asyncio.Lock()
 
     async def start_device_login(self, project_id: uuid.UUID, name: str) -> dict:
         """Start dws auth login --device, return verification_url + user_code + session_key."""
         session_key = uuid.uuid4().hex
-        home_dir = mkdtemp(prefix="dws-device-")
-        os.makedirs(os.path.join(home_dir, "Library", "Keychains"), exist_ok=True)
+        root = mkdtemp(prefix="dws-device-")
+        env = make_dws_env(root)
 
         proc = await asyncio.create_subprocess_exec(
             self._settings.dws_cli_path, "auth", "login", "--device",
             "--format", "json",
             stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
-            env={**os.environ, "HOME": home_dir},
-            cwd=home_dir,
+            env=env, cwd=root,
         )
 
         try:
@@ -67,12 +66,13 @@ class CredentialService:
             info = json.loads(first_chunk)
         except Exception as e:
             proc.kill()
-            shutil.rmtree(home_dir, ignore_errors=True)
+            shutil.rmtree(root, ignore_errors=True)
             raise ValueError(f"Failed to start device login: {e}") from e
 
         self._active_sessions[session_key] = {
             "proc": proc,
-            "home_dir": home_dir,
+            "root": root,
+            "env": env,
             "name": name,
             "project_id": project_id,
             "created_at": time.monotonic(),
@@ -110,13 +110,14 @@ class CredentialService:
         session = self._active_sessions.get(session_key)
         if session is None:
             raise ValueError("Session not found or expired")
-        home_dir = session["home_dir"]
+        env = session["env"]
+        root = session["root"]
 
         try:
             status_proc = await asyncio.create_subprocess_exec(
                 self._settings.dws_cli_path, "auth", "status", "--format", "json",
                 stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
-                env={**os.environ, "HOME": home_dir},
+                env=env,
             )
             stdout, _ = await status_proc.communicate()
             status_data = json.loads(stdout.decode()) if stdout else {}
@@ -124,11 +125,11 @@ class CredentialService:
             token_expires_at_str = status_data.get("expires_at")
             refresh_expires_at_str = status_data.get("refresh_expires_at")
 
-            export_path = os.path.join(home_dir, "dws-export.b64")
+            export_path = os.path.join(root, "dws-export.b64")
             export_proc = await asyncio.create_subprocess_exec(
                 self._settings.dws_cli_path, "auth", "export", "--base64", "-o", export_path,
                 stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
-                env={**os.environ, "HOME": home_dir},
+                env=env,
             )
             await export_proc.communicate()
             if export_proc.returncode != 0 or not os.path.exists(export_path):
@@ -205,61 +206,56 @@ class CredentialService:
         return credential
 
     async def _probe_auth_blob(self, auth_b64: str) -> dict:
-        """import base64 凭证 + status 探测，返回元数据。使用真实 HOME 保证 macOS 钥匙串可访问。
-        base64 非法 / import 失败抛 ValueError。
-        串行锁 _dws_lock 避免多个进程同时操作真实 HOME 的 ~/.dws 状态。"""
+        """import base64 凭证到隔离 env，调 status 返回元数据。
+        base64 非法 / import 失败抛 ValueError。"""
         try:
             binascii.a2b_base64(auth_b64.encode("utf-8"))
         except (binascii.Error, ValueError) as e:
             raise ValueError(f"auth_blob 不是合法的 base64: {e}") from e
 
-        async with self._dws_lock:
-            fd, import_path = tempfile.mkstemp(suffix=".b64", prefix="dws-auth-")
-            os.close(fd)
+        with isolated_dws_env() as env:
+            import_path = os.path.join(env["HOME"], "auth.b64")
+            with open(import_path, "w") as f:
+                f.write(auth_b64)
+
+            import_proc = await asyncio.create_subprocess_exec(
+                self._settings.dws_cli_path, "auth", "import", "--base64", "-i", import_path,
+                stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE, env=env,
+            )
             try:
-                with open(import_path, "w") as f:
-                    f.write(auth_b64)
+                stdout, stderr = await asyncio.wait_for(import_proc.communicate(), timeout=30)
+            except asyncio.TimeoutError:
+                import_proc.kill()
+                raise ValueError("dws auth import 超时")
+            if import_proc.returncode != 0:
+                detail = stderr.decode().strip() if stderr else ""
+                msg = "dws auth import 失败：凭证无效"
+                if detail:
+                    msg += f"（{detail}）"
+                raise ValueError(msg)
 
-                logout_proc = await asyncio.create_subprocess_exec(
-                    self._settings.dws_cli_path, "auth", "logout",
-                    stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
-                )
-                await logout_proc.communicate()
+            status_proc = await asyncio.create_subprocess_exec(
+                self._settings.dws_cli_path, "auth", "status", "--format", "json",
+                stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE, env=env,
+            )
+            try:
+                stdout, _ = await asyncio.wait_for(status_proc.communicate(), timeout=30)
+            except asyncio.TimeoutError:
+                status_proc.kill()
+                raise ValueError("dws auth status 超时")
+            return json.loads(stdout.decode()) if stdout else {}
 
-                import_proc = await asyncio.create_subprocess_exec(
-                    self._settings.dws_cli_path, "auth", "import", "--base64", "-i", import_path,
-                    stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
-                )
-                try:
-                    stdout, stderr = await asyncio.wait_for(import_proc.communicate(), timeout=30)
-                except asyncio.TimeoutError:
-                    import_proc.kill()
-                    raise ValueError("dws auth import 超时")
-                if import_proc.returncode != 0:
-                    detail = stderr.decode().strip() if stderr else ""
-                    msg = "dws auth import 失败：凭证无效"
-                    if detail:
-                        msg += f"（{detail}）"
-                    raise ValueError(msg)
-
-                status_proc = await asyncio.create_subprocess_exec(
-                    self._settings.dws_cli_path, "auth", "status", "--format", "json",
-                    stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
-                )
-                try:
-                    stdout, _ = await asyncio.wait_for(status_proc.communicate(), timeout=30)
-                except asyncio.TimeoutError:
-                    status_proc.kill()
-                    raise ValueError("dws auth status 超时")
-                return json.loads(stdout.decode()) if stdout else {}
-            finally:
-                os.unlink(import_path)
-
-    async def _run_dws(self, args: list[str], log_path: str | None = None,
+    async def _run_dws(self, args: list[str], env: dict[str, str] | None = None,
+                       log_path: str | None = None,
                        timeout: float = 120.0) -> tuple[int, bytes, bytes]:
+        kwargs: dict = {
+            "stdout": asyncio.subprocess.PIPE,
+            "stderr": asyncio.subprocess.PIPE,
+        }
+        if env is not None:
+            kwargs["env"] = env
         proc = await asyncio.create_subprocess_exec(
-            self._settings.dws_cli_path, *args,
-            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+            self._settings.dws_cli_path, *args, **kwargs,
         )
         try:
             stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout)
@@ -274,17 +270,6 @@ class CredentialService:
             except OSError:
                 pass
         return proc.returncode, stdout, stderr
-
-    async def _ensure_dws_state(self) -> None:
-        state_path = os.path.join(os.environ.get("HOME", "/root"), ".dws", "dws-state.json")
-        if os.path.exists(state_path):
-            return
-        try:
-            rc, _, _ = await self._run_dws(["wiki", "space", "list"])
-            if rc != 0:
-                logger.warning("dws wiki space list returned %d during state bootstrap", rc)
-        except Exception:
-            logger.warning("Failed to bootstrap dws state", exc_info=True)
 
     async def check_status(self, credential_id: uuid.UUID, project_id: uuid.UUID) -> dict:
         """测试凭证可用性并回写最新 corp_id/过期时间/status。"""
@@ -355,50 +340,35 @@ class CredentialService:
         started_at = datetime.now(timezone.utc)
 
         try:
-            await self._ensure_dws_state()
-            async with self._dws_lock:
-                fd, tmp_import = tempfile.mkstemp(suffix=".b64", prefix="dws-keepalive-")
-                os.close(fd)
-                try:
-                    with open(tmp_import, "w") as f:
-                        f.write(auth_b64)
-                    await self._run_dws(["auth", "logout"])
-                    rc, _, _ = await self._run_dws(["auth", "import", "--base64", "-i", tmp_import],
-                                                   log_path=log_path)
-                    if rc != 0:
-                        raise CredentialError(f"dws auth import failed (exit {rc})")
+            with isolated_dws_env() as env:
+                import_path = os.path.join(env["HOME"], "auth.b64")
+                with open(import_path, "w") as f:
+                    f.write(auth_b64)
+                rc, _, _ = await self._run_dws(["auth", "import", "--base64", "-i", import_path],
+                                               env=env, log_path=log_path)
+                if rc != 0:
+                    raise CredentialError(f"dws auth import failed (exit {rc})")
 
-                    async with self._session_factory() as session:
-                        await session.execute(update(Job).where(Job.id == job.id).values(
-                            status=JobStatus.running, started_at=started_at, log_path=log_path))
-                        await session.commit()
+                async with self._session_factory() as session:
+                    await session.execute(update(Job).where(Job.id == job.id).values(
+                        status=JobStatus.running, started_at=started_at, log_path=log_path))
+                    await session.commit()
 
-                    rc, _, _ = await self._run_dws(["wiki", "space", "list"], log_path=log_path)
-                    if rc != 0:
-                        raise CredentialError(f"dws wiki space list failed (exit {rc})")
+                rc, _, _ = await self._run_dws(["wiki", "space", "list"], env=env, log_path=log_path)
+                if rc != 0:
+                    raise CredentialError(f"dws wiki space list failed (exit {rc})")
 
-                    rc, status_out, _ = await self._run_dws(["auth", "status", "--format", "json"],
-                                                            log_path=log_path)
-                    meta = json.loads(status_out.decode()) if status_out else {}
+                rc, status_out, _ = await self._run_dws(["auth", "status", "--format", "json"],
+                                                        env=env, log_path=log_path)
+                meta = json.loads(status_out.decode()) if status_out else {}
 
-                    fd2, tmp_export = tempfile.mkstemp(suffix=".b64", prefix="dws-keepalive-export-")
-                    os.close(fd2)
-                    rc, _, _ = await self._run_dws(["auth", "export", "--base64", "-o", tmp_export],
-                                                   log_path=log_path)
-                    if rc != 0 or not os.path.exists(tmp_export):
-                        raise CredentialError("dws auth export failed")
-                    with open(tmp_export, "r") as f:
-                        new_blob = f.read().strip()
-                    os.unlink(tmp_export)
-                finally:
-                    try:
-                        os.unlink(tmp_import)
-                    except OSError:
-                        pass
-                    try:
-                        await self._run_dws(["auth", "logout"])
-                    except Exception:
-                        pass
+                export_path = os.path.join(env["HOME"], "export.b64")
+                rc, _, _ = await self._run_dws(["auth", "export", "--base64", "-o", export_path],
+                                               env=env, log_path=log_path)
+                if rc != 0 or not os.path.exists(export_path):
+                    raise CredentialError("dws auth export failed")
+                with open(export_path, "r") as f:
+                    new_blob = f.read().strip()
 
             new_blob_hex = encrypt_sm4(new_blob, key_hex)
             token_exp = _parse_dt(meta.get("expires_at"))
@@ -467,7 +437,7 @@ class CredentialService:
             proc = session.get("proc")
             if proc and proc.returncode is None:
                 proc.kill()
-            shutil.rmtree(session.get("home_dir", ""), ignore_errors=True)
+            shutil.rmtree(session.get("root", ""), ignore_errors=True)
 
     async def cleanup_expired_sessions(self) -> None:
         """Remove device login sessions older than 15 minutes."""
