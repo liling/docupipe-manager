@@ -1,3 +1,4 @@
+import logging
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -7,6 +8,7 @@ from sqlalchemy.exc import IntegrityError
 from docupipe_manager import deps
 from docupipe_manager.api.projects import _require_access_async
 
+log = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/projects/{project_id}/credentials", tags=["credentials"])
 
 
@@ -49,6 +51,10 @@ async def import_credential(project_id: uuid.UUID, body: ImportRequest,
         raise HTTPException(status_code=400, detail=str(e))
     except IntegrityError:
         raise HTTPException(status_code=409, detail=f"凭证名「{body.name}」已存在")
+    try:
+        await deps.get_scheduler().schedule_keepalive(cred.id)
+    except Exception:
+        log.warning("Failed to schedule keepalive for credential %s", cred.id, exc_info=True)
     return {"id": str(cred.id), "status": "active"}
 
 
@@ -70,6 +76,10 @@ async def finalize_device_login(project_id: uuid.UUID, body: FinalizeRequest,
     cred = await deps.get_credential().finalize_login(
         body.session_key, body.name, uuid.UUID(user["id"]), project_id
     )
+    try:
+        await deps.get_scheduler().schedule_keepalive(cred.id)
+    except Exception:
+        log.warning("Failed to schedule keepalive for credential %s", cred.id, exc_info=True)
     return {"id": str(cred.id), "status": "active"}
 
 
@@ -87,6 +97,10 @@ async def revoke_credential(project_id: uuid.UUID, credential_id: uuid.UUID,
                             user: dict = Depends(_require_access_async)):
     try:
         await deps.get_credential().revoke(credential_id, uuid.UUID(user["id"]), project_id)
+        try:
+            await deps.get_scheduler().unschedule_keepalive(credential_id)
+        except Exception:
+            log.warning("Failed to unschedule keepalive for credential %s", credential_id, exc_info=True)
         return {"status": "revoked"}
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))

@@ -69,13 +69,14 @@ async def test_finalize_device_login(async_client):
     override_get_current_user({"id": str(uuid.uuid4()), "role": "admin"})
     pid = uuid.uuid4()
     cred_id = uuid.uuid4()
+    mock_cred = MagicMock(); mock_cred.id = cred_id
     with (
         patch("docupipe_manager.api.credentials._require_access_async", new=AsyncMock(return_value={"role": "admin"})),
         patch("docupipe_manager.deps.get_credential") as mock_get_credential,
+        patch("docupipe_manager.deps.get_scheduler") as mock_get_scheduler,
     ):
-        mock_cred = MagicMock()
-        mock_cred.id = cred_id
         mock_get_credential.return_value.finalize_login = AsyncMock(return_value=mock_cred)
+        mock_get_scheduler.return_value.schedule_keepalive = AsyncMock()
         r = await async_client.post(
             f"/docupipe/api/projects/{pid}/credentials/device-login/finalize",
             json={"session_key": "sk", "name": "my-cred"},
@@ -93,8 +94,10 @@ async def test_import_credential(async_client):
     with (
         patch("docupipe_manager.api.credentials._require_access_async", new=AsyncMock(return_value={"role": "admin"})),
         patch("docupipe_manager.deps.get_credential") as mock_get_credential,
+        patch("docupipe_manager.deps.get_scheduler") as mock_get_scheduler,
     ):
         mock_get_credential.return_value.create_from_import = AsyncMock(return_value=mock_cred)
+        mock_get_scheduler.return_value.schedule_keepalive = AsyncMock()
         r = await async_client.post(
             f"/docupipe/api/projects/{pid}/credentials/import",
             json={"name": "imp", "auth_blob": "YWJj"},
@@ -160,8 +163,10 @@ async def test_revoke_credential(async_client):
     with (
         patch("docupipe_manager.api.credentials._require_access_async", new=AsyncMock(return_value={"role": "admin"})),
         patch("docupipe_manager.deps.get_credential") as mock_get_credential,
+        patch("docupipe_manager.deps.get_scheduler") as mock_get_scheduler,
     ):
         mock_get_credential.return_value.revoke = AsyncMock(return_value=None)
+        mock_get_scheduler.return_value.unschedule_keepalive = AsyncMock()
         r = await async_client.delete(f"/docupipe/api/projects/{pid}/credentials/{cid}")
         assert r.status_code == 200
         assert r.json()["status"] == "revoked"
@@ -180,6 +185,69 @@ async def test_revoke_credential_404(async_client):
         mock_get_credential.return_value.revoke = AsyncMock(side_effect=ValueError("not found"))
         r = await async_client.delete(f"/docupipe/api/projects/{pid}/credentials/{cid}")
         assert r.status_code == 404
+    clear_overrides()
+
+
+@pytest.mark.asyncio
+async def test_import_credential_schedules_keepalive(async_client):
+    override_get_current_user({"id": str(uuid.uuid4()), "role": "admin"})
+    pid = uuid.uuid4()
+    mock_cred = MagicMock(); mock_cred.id = uuid.uuid4()
+    with (
+        patch("docupipe_manager.api.credentials._require_access_async", new=AsyncMock(return_value={"role": "admin"})),
+        patch("docupipe_manager.deps.get_credential") as mock_get_credential,
+        patch("docupipe_manager.deps.get_scheduler") as mock_get_scheduler,
+    ):
+        mock_get_credential.return_value.create_from_import = AsyncMock(return_value=mock_cred)
+        sched = MagicMock(); sched.schedule_keepalive = AsyncMock()
+        mock_get_scheduler.return_value = sched
+        r = await async_client.post(
+            f"/docupipe/api/projects/{pid}/credentials/import",
+            json={"name": "imp", "auth_blob": "YWJj"},
+        )
+        assert r.status_code == 200
+        sched.schedule_keepalive.assert_awaited_once_with(mock_cred.id)
+    clear_overrides()
+
+
+@pytest.mark.asyncio
+async def test_revoke_credential_unschedules_keepalive(async_client):
+    override_get_current_user({"id": str(uuid.uuid4()), "role": "admin"})
+    pid = uuid.uuid4(); cid = uuid.uuid4()
+    with (
+        patch("docupipe_manager.api.credentials._require_access_async", new=AsyncMock(return_value={"role": "admin"})),
+        patch("docupipe_manager.deps.get_credential") as mock_get_credential,
+        patch("docupipe_manager.deps.get_scheduler") as mock_get_scheduler,
+    ):
+        mock_get_credential.return_value.revoke = AsyncMock(return_value=None)
+        sched = MagicMock(); sched.unschedule_keepalive = AsyncMock()
+        mock_get_scheduler.return_value = sched
+        r = await async_client.delete(f"/docupipe/api/projects/{pid}/credentials/{cid}")
+        assert r.status_code == 200
+        sched.unschedule_keepalive.assert_awaited_once_with(cid)
+    clear_overrides()
+
+
+@pytest.mark.asyncio
+async def test_finalize_device_login_schedules_keepalive(async_client):
+    override_get_current_user({"id": str(uuid.uuid4()), "role": "admin"})
+    pid = uuid.uuid4()
+    cred_id = uuid.uuid4()
+    with (
+        patch("docupipe_manager.api.credentials._require_access_async", new=AsyncMock(return_value={"role": "admin"})),
+        patch("docupipe_manager.deps.get_credential") as mock_get_credential,
+        patch("docupipe_manager.deps.get_scheduler") as mock_get_scheduler,
+    ):
+        mock_cred = MagicMock(); mock_cred.id = cred_id
+        mock_get_credential.return_value.finalize_login = AsyncMock(return_value=mock_cred)
+        sched = MagicMock(); sched.schedule_keepalive = AsyncMock()
+        mock_get_scheduler.return_value = sched
+        r = await async_client.post(
+            f"/docupipe/api/projects/{pid}/credentials/device-login/finalize",
+            json={"session_key": "sk", "name": "my-cred"},
+        )
+        assert r.status_code == 200
+        sched.schedule_keepalive.assert_awaited_once_with(cred_id)
     clear_overrides()
 
 
