@@ -245,8 +245,6 @@ async def test_do_execute_flushes_and_broadcasts_each_line(runner_service, tmp_p
     runner_service._settings.data_dir = str(tmp_path)
 
     with patch("docupipe_manager.services.runner_service.decrypt_sm4", return_value="auth"), \
-         patch("tempfile.mkstemp", return_value=(os.open(os.devnull, os.O_RDONLY),
-                                                  os.path.join(str(tmp_path), "auth.b64"))), \
          patch("asyncio.create_subprocess_exec", new=AsyncMock()) as mock_sub:
         proc1 = MagicMock()
         proc1.communicate = AsyncMock(return_value=(b"", b""))
@@ -254,7 +252,7 @@ async def test_do_execute_flushes_and_broadcasts_each_line(runner_service, tmp_p
         proc2.stdout.readline = AsyncMock(side_effect=[b"line A\n", b"line B\n", b""])
         proc2.wait = AsyncMock(return_value=0)
         proc2.pid = 12345
-        mock_sub.side_effect = [proc1, proc1, proc2]
+        mock_sub.side_effect = [proc1, proc2]
 
         _, queue = runner_service.subscribe(rid)
         await runner_service._do_execute(rid)
@@ -310,14 +308,9 @@ async def test_do_execute_truncates_log_file_at_max_bytes(runner_service, tmp_pa
     runner_service._settings.data_dir = str(tmp_path / "data")
     runner_service._settings.run_log_max_bytes = 64
 
-    home_dir = tmp_path / "home"
-    home_dir.mkdir(exist_ok=True)
-
     lines = [b"this-is-a-long-line-XX\n"] * 20
 
     with patch("docupipe_manager.services.runner_service.decrypt_sm4", return_value="auth"), \
-         patch("tempfile.mkstemp", return_value=(os.open(os.devnull, os.O_RDONLY),
-                                                     os.path.join(str(home_dir), "auth.b64"))), \
          patch("asyncio.create_subprocess_exec", new=AsyncMock()) as mock_sub:
         proc1 = MagicMock()
         proc1.communicate = AsyncMock(return_value=(b"", b""))
@@ -325,7 +318,7 @@ async def test_do_execute_truncates_log_file_at_max_bytes(runner_service, tmp_pa
         proc2.stdout.readline = AsyncMock(side_effect=lines + [b""])
         proc2.wait = AsyncMock(return_value=0)
         proc2.pid = 12345
-        mock_sub.side_effect = [proc1, proc1, proc2]
+        mock_sub.side_effect = [proc1, proc2]
 
         _, queue = runner_service.subscribe(rid)
         await runner_service._do_execute(rid)
@@ -469,6 +462,55 @@ async def test_do_execute_injects_project_env_into_subprocess(runner_service, tm
 
     assert mock_sub.call_count == 1
     env_passed = mock_sub.call_args.kwargs["env"]
+    assert env_passed["DWS_DISABLE_KEYCHAIN"] == "1"
     assert env_passed["MY_PLAIN"] == "hello"
     assert env_passed["MY_SECRET"] == "topsecret"
-    assert "HOME" in env_passed
+
+
+@pytest.mark.asyncio
+async def test_do_execute_shares_isolated_env_and_no_logout(runner_service, tmp_path):
+    """import 与 docupipe 子进程共享同一隔离 HOME；不再调 auth logout。"""
+    rid = uuid.uuid4()
+    runner_service._active_runs.add(rid)
+    task_id = uuid.uuid4()
+
+    run_mock = MagicMock(); run_mock.id = rid; run_mock.task_id = task_id
+    run_mock.mode = "incremental"; run_mock.pipeline_name = None
+    task_mock = MagicMock(); task_mock.id = task_id
+    task_mock.credential_id = uuid.uuid4()
+    task_mock.credential_type = CredentialType.dws
+    task_mock.config_yaml = "k: v"; task_mock.slug = "demo"
+    cred_mock = MagicMock(); cred_mock.auth_blob.hex = MagicMock(return_value="00" * 16)
+
+    sessions = [MagicMock(), MagicMock(), MagicMock(), MagicMock()]
+    idx = {"i": 0}
+    def fake_factory():
+        s = sessions[idx["i"]]; idx["i"] += 1
+        cm = MagicMock(); cm.__aenter__ = AsyncMock(return_value=s); cm.__aexit__ = AsyncMock(return_value=None)
+        return cm
+    sessions[0].get = AsyncMock(side_effect=[run_mock, task_mock, cred_mock])
+    sessions[0].execute = AsyncMock(return_value=_empty_env_result())
+    sessions[1].execute = AsyncMock(); sessions[1].commit = AsyncMock()
+    sessions[2].execute = AsyncMock(); sessions[2].commit = AsyncMock()
+    sessions[3].execute = AsyncMock(); sessions[3].commit = AsyncMock()
+    runner_service._session_factory = fake_factory
+    runner_service._settings.data_dir = str(tmp_path)
+
+    with patch("docupipe_manager.services.runner_service.decrypt_sm4", return_value="auth"), \
+         patch("asyncio.create_subprocess_exec", new=AsyncMock()) as mock_sub:
+        import_proc = MagicMock(); import_proc.communicate = AsyncMock(return_value=(b"", b""))
+        docupipe_proc = MagicMock()
+        docupipe_proc.stdout.readline = AsyncMock(side_effect=[b"hi\n", b""])
+        docupipe_proc.wait = AsyncMock(return_value=0); docupipe_proc.pid = 1
+        mock_sub.side_effect = [import_proc, docupipe_proc]
+
+        await runner_service._do_execute(rid)
+
+    # 只有 import + docupipe 两个子进程，没有 logout
+    all_args = [list(c[0]) for c in mock_sub.call_args_list]
+    assert not any("logout" in a for a in all_args)
+    envs = [c.kwargs.get("env") for c in mock_sub.call_args_list]
+    homes = {e["HOME"] for e in envs}
+    assert len(homes) == 1                       # 共享同一隔离 HOME
+    assert envs[0]["DWS_DISABLE_KEYCHAIN"] == "1"
+    assert next(iter(homes)) != os.environ.get("HOME")

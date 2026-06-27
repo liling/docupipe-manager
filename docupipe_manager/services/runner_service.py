@@ -7,7 +7,6 @@ import uuid
 from collections import deque
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-import tempfile
 
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker
@@ -20,6 +19,7 @@ from docupipe_manager.models.pipeline_run import PipelineRun
 from docupipe_manager.models.project_env_var import ProjectEnvVar
 from docupipe_manager.models.task import CredentialType, Task
 from docupipe_manager.platform.client import XinyiPlatformClient
+from docupipe_manager.services.dws_env import isolated_dws_env
 
 logger = logging.getLogger(__name__)
 
@@ -211,36 +211,28 @@ class RunnerService:
         command_text = " ".join(shlex.quote(c) for c in cmd)
         return cmd, command_text
 
-    async def _import_credential(self, ctx: _RunContext) -> str:
+    async def _import_credential(self, ctx: _RunContext, env: dict[str, str]) -> None:
         key_hex = self._settings.encryption_key
         auth_b64 = decrypt_sm4(ctx.credential.auth_blob.hex(), key_hex)
 
-        fd, auth_temp_path = tempfile.mkstemp(suffix=".b64", prefix="dws-run-")
-        os.close(fd)
-        with open(auth_temp_path, "w") as f:
+        import_path = os.path.join(env["HOME"], "auth.b64")
+        with open(import_path, "w") as f:
             f.write(auth_b64)
 
-        logout_before = await asyncio.create_subprocess_exec(
-            self._settings.dws_cli_path, "auth", "logout",
-            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
-        )
-        await logout_before.communicate()
-
         import_proc = await asyncio.create_subprocess_exec(
-            self._settings.dws_cli_path, "auth", "import", "--base64", "-i", auth_temp_path,
-            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+            self._settings.dws_cli_path, "auth", "import", "--base64", "-i", import_path,
+            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE, env=env,
         )
         await import_proc.communicate()
-        return auth_temp_path
 
     async def _stream_subprocess(
-        self, cmd: list[str], project_env: dict[str, str],
+        self, cmd: list[str], env: dict[str, str],
         project_dir: str, log_path: str, run_id: uuid.UUID,
     ) -> tuple[int, str | None]:
         proc = await asyncio.create_subprocess_exec(
             *cmd,
             stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT,
-            env={**os.environ, **project_env},
+            env=env,
             cwd=project_dir,
         )
         async with self._session_factory() as session:
@@ -320,12 +312,9 @@ class RunnerService:
 
         cmd, command_text = self._build_command(ctx, config_path, state_dir)
 
-        auth_temp_path = None
-        imported = False
-        try:
+        with isolated_dws_env() as dws_env:
             if ctx.credential is not None:
-                auth_temp_path = await self._import_credential(ctx)
-                imported = True
+                await self._import_credential(ctx, dws_env)
 
             started_at = datetime.now(timezone.utc)
             async with self._session_factory() as session:
@@ -337,27 +326,12 @@ class RunnerService:
                 )
                 await session.commit()
 
+            run_env = {**dws_env, **ctx.project_env}
             exit_code, error_message = await self._stream_subprocess(
-                cmd, ctx.project_env, project_dir, log_path, run_id,
+                cmd, run_env, project_dir, log_path, run_id,
             )
 
             await self._finalize_run(run_id, exit_code, error_message, ctx.task.id)
-
-        finally:
-            if auth_temp_path:
-                try:
-                    os.unlink(auth_temp_path)
-                except OSError:
-                    pass
-            if imported:
-                try:
-                    logout_proc = await asyncio.create_subprocess_exec(
-                        self._settings.dws_cli_path, "auth", "logout",
-                        stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
-                    )
-                    await logout_proc.communicate()
-                except Exception:
-                    pass
 
     async def _mark_run_failed(self, run_id: uuid.UUID, error_message: str) -> None:
         try:
