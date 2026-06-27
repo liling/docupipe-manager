@@ -308,7 +308,7 @@ class RunnerService:
             await session.execute(
                 update(Job).where(Job.id == run_id).values(
                     status=JobStatus(status.value), exit_code=exit_code, completed_at=completed_at,
-                    error_message=error_message, pid=None, log_path=None,  # log_path 留待读端切后再迁移
+                    error_message=error_message, pid=None,
                 )
             )
             await session.commit()

@@ -73,6 +73,29 @@ async def test_start_run_creates_job_and_pipeline_run(runner_service):
 
 
 @pytest.mark.asyncio
+async def test_finalize_run_preserves_job_log_path(runner_service):
+    """_finalize_run 写入 Job 时不应清空 log_path（之前 _do_execute 已写入）。"""
+    from sqlalchemy.sql.dml import Update
+    from docupipe_manager.models.job import Job
+    rid = uuid.uuid4()
+    job_update_values = []
+    with patch.object(runner_service, "_session_factory") as mock_sf:
+        ms = AsyncMock(); ms.__aenter__ = AsyncMock(return_value=ms); ms.__aexit__ = AsyncMock(return_value=None)
+        ms.commit = AsyncMock()
+        async def fake_exec(stmt, *a, **kw):
+            if isinstance(stmt, Update) and stmt.table.name == "jobs":
+                job_update_values.append(stmt._values)
+            return None
+        ms.execute = fake_exec
+        mock_sf.return_value = ms
+        await runner_service._finalize_run(rid, 0, None, uuid.uuid4())
+    assert job_update_values, "expected a Job update in _finalize_run"
+    for vals in job_update_values:
+        # log_path 不得在 values 中（即不得覆写为 NULL，保留 _do_execute 阶段写入的路径）
+        assert "log_path" not in vals, f"_finalize_run clobbered Job.log_path: {vals}"
+
+
+@pytest.mark.asyncio
 async def test_cancel_pending_run(runner_service):
     run_mock = MagicMock()
     run_mock.status = RunStatus.pending
