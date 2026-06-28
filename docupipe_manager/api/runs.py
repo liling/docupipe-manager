@@ -1,5 +1,6 @@
 import asyncio
 import json
+import types
 import uuid
 from typing import Optional
 
@@ -14,19 +15,20 @@ MAX_TAIL_LINES = 1000
 
 
 async def _verify_run_access(run_id: uuid.UUID, user: dict):
-    from sqlalchemy import select, text
-    from docupipe_manager.models.pipeline_run import PipelineRun
-    from docupipe_manager.models.job import Job
+    from sqlalchemy import text
 
     engine = deps.get_engine()
     async with engine.begin() as conn:
-        row = (await conn.execute(
-            select(PipelineRun, Job).join(Job, PipelineRun.job_id == Job.id)
-            .where(PipelineRun.id == run_id)
-        )).one_or_none()
+        row = (await conn.execute(text("""
+            SELECT pr.task_id, j.log_path FROM docupipe_manager.pipeline_runs pr
+            JOIN docupipe_manager.jobs j ON j.id = pr.job_id
+            WHERE pr.id = :rid
+        """), {"rid": str(run_id)})).one_or_none()
     if row is None:
         raise HTTPException(status_code=404, detail="Run not found")
-    run, job = row
+    task_id, log_path = row[0], row[1]
+    run = types.SimpleNamespace(id=run_id)
+    job = types.SimpleNamespace(log_path=log_path)
 
     if user.get("role") != "admin":
         async with engine.begin() as conn:
@@ -36,7 +38,7 @@ async def _verify_run_access(run_id: uuid.UUID, user: dict):
                 WHERE t.id = :tid AND p.id IN (
                     SELECT pm.project_id FROM docupipe_manager.project_members pm WHERE pm.user_id = :uid
                 )
-            """), {"tid": str(run.task_id), "uid": user["id"]})
+            """), {"tid": str(task_id), "uid": user["id"]})
             if not m.fetchone():
                 raise HTTPException(status_code=404, detail="Run not found")
 
@@ -147,48 +149,42 @@ async def list_runs(
 
 
 async def _run_detail(run_id: uuid.UUID) -> dict:
-    from sqlalchemy import select
-    from docupipe_manager.models.pipeline_run import PipelineRun
-    from docupipe_manager.models.job import Job
-    from docupipe_manager.models.task import Task
+    from sqlalchemy import text
 
     engine = deps.get_engine()
     async with engine.begin() as conn:
-        row = (await conn.execute(
-            select(PipelineRun, Job).join(Job, PipelineRun.job_id == Job.id)
-            .where(PipelineRun.id == run_id)
-        )).one_or_none()
-        task = None
-        if row is not None:
-            run, job = row
-            task = (await conn.execute(
-                select(Task).where(Task.id == run.task_id)
-            )).one_or_none()
+        row = (await conn.execute(text("""
+            SELECT pr.id, pr.task_id, pr.pipeline_name, pr.mode,
+                   j.status, j.exit_code, j.command_text,
+                   j.started_at, j.completed_at, j.error_message,
+                   j.log_path, j.created_at, j.trigger_type, j.triggered_by,
+                   t.name AS task_name, t.project_id
+            FROM docupipe_manager.pipeline_runs pr
+            JOIN docupipe_manager.jobs j ON j.id = pr.job_id
+            LEFT JOIN docupipe_manager.tasks t ON t.id = pr.task_id
+            WHERE pr.id = :rid
+        """), {"rid": str(run_id)})).one_or_none()
 
     if row is None:
         return {}
-    run, job = row
-
-    def _v(x):
-        return x.value if hasattr(x, "value") else x
 
     return {
-        "id": str(run.id),
-        "task_id": str(run.task_id),
-        "task_name": task.name if task else None,
-        "project_id": str(task.project_id) if task else None,
-        "trigger_type": _v(job.trigger_type),
-        "triggered_by": str(job.triggered_by) if job.triggered_by else None,
-        "pipeline_name": run.pipeline_name,
-        "mode": run.mode,
-        "status": _v(job.status),
-        "exit_code": job.exit_code,
-        "command_text": job.command_text,
-        "started_at": str(job.started_at) if job.started_at else None,
-        "completed_at": str(job.completed_at) if job.completed_at else None,
-        "error_message": job.error_message,
-        "log_path": job.log_path,
-        "created_at": str(job.created_at),
+        "id": str(row[0]),
+        "task_id": str(row[1]),
+        "pipeline_name": row[2],
+        "mode": row[3],
+        "status": row[4].value if hasattr(row[4], "value") else row[4],
+        "exit_code": row[5],
+        "command_text": row[6],
+        "started_at": str(row[7]) if row[7] else None,
+        "completed_at": str(row[8]) if row[8] else None,
+        "error_message": row[9],
+        "log_path": row[10],
+        "created_at": str(row[11]),
+        "trigger_type": row[12].value if hasattr(row[12], "value") else row[12],
+        "triggered_by": str(row[13]) if row[13] else None,
+        "task_name": row[14],
+        "project_id": str(row[15]) if row[15] else None,
     }
 
 
