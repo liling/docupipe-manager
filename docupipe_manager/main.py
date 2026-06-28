@@ -212,6 +212,7 @@ DOCUPIPE_NAV_MENU = [
         "items": [
             {"id": "projects", "label": "项目", "href": "/docupipe/projects"},
             {"id": "runs",     "label": "运行", "href": "/docupipe/runs"},
+            {"id": "schedules","label": "调度", "href": "/docupipe/schedules"},
         ],
     },
 ]

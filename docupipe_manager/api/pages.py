@@ -66,6 +66,11 @@ async def runs_list(request: Request, user: dict = Depends(get_current_user)):
     return _render(request, "docupipe/runs.html", {"current_user": user})
 
 
+@router.get("/schedules")
+async def schedules_list(request: Request, user: dict = Depends(require_admin)):
+    return _render(request, "docupipe/schedules.html", {"current_user": user})
+
+
 @router.get("/runs/{run_id}")
 async def run_detail(request: Request, run_id: str, user: dict = Depends(get_current_user)):
     return _render(request, "docupipe/runs/detail.html",
