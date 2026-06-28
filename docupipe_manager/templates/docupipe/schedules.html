@@ -1,0 +1,93 @@
+{% extends "base.html" %}
+{% block title %}调度计划{% endblock %}
+{% block content %}
+<div class="content-header">
+    <h2>调度计划</h2>
+</div>
+
+<div id="sched-summary" class="card-row-meta">加载中...</div>
+<div id="schedules-list">
+    <div class="empty-state">加载中...</div>
+</div>
+<script>
+function escapeHtml(s) {
+  if (s == null) return "";
+  return String(s)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+function kindTag(k) {
+  return k === "keepalive" ? "Keepalive" : "Task";
+}
+function statusCell(s) {
+  if (!s.registered) {
+    return '<span class="status-tag is-failed">未注册</span>';
+  }
+  if (s.next_run_time === null) {
+    return '<span class="status-tag is-running">已暂停</span>';
+  }
+  return '<span class="status-tag is-success">启用</span>';
+}
+function relTime(iso) {
+  if (!iso) return "—";
+  const d = new Date(iso);
+  const diff = d - new Date();
+  const h = Math.round(diff / 3600000);
+  if (h <= 0) return "即将执行";
+  if (h < 24) return h + " 小时后";
+  return Math.round(h / 24) + " 天后";
+}
+function contextCell(s) {
+  if (s.kind === "task") {
+    const p = s.context.project_name
+      ? `<a href="/docupipe/projects/${escapeHtml(s.context.project_id)}">${escapeHtml(s.context.project_name)}</a>` : "—";
+    return `${p} / ${escapeHtml(s.context.task_name || "—")}`;
+  }
+  return `凭证：${escapeHtml(s.context.credential_name || "—")}（${escapeHtml(s.context.credential_status)}）`;
+}
+
+async function loadSchedules() {
+  const box = document.getElementById("schedules-list");
+  const sum = document.getElementById("sched-summary");
+  const r = await fetch(`${API_PREFIX}/api/schedules`);
+  if (!r.ok) {
+    if (r.status === 403) { box.innerHTML = '<div class="empty-state">需要管理员权限。</div>'; }
+    else { box.innerHTML = '<div class="empty-state">加载失败</div>'; }
+    sum.textContent = "";
+    return;
+  }
+  const data = await r.json();
+  const taskN = data.schedules.filter(s => s.kind === "task").length;
+  const kaN = data.schedules.length - taskN;
+  const cronNote = data.keepalive_enabled
+    ? `全局 keepalive cron: ${data.keepalive_cron}`
+    : "keepalive 未启用";
+  sum.textContent = `${taskN} 个 Task 调度 · ${kaN} 个 Keepalive 调度 · ${cronNote}`;
+
+  if (!data.schedules.length) {
+    box.innerHTML = '<div class="empty-state">暂无调度。</div>';
+    return;
+  }
+  let html = '<table class="data-table"><thead><tr>'
+    + '<th>类型</th><th>名称</th><th>所属</th><th>Cron</th>'
+    + '<th>下次执行</th><th>状态</th></tr></thead><tbody>';
+  for (const s of data.schedules) {
+    html += `<tr>
+      <td>${kindTag(s.kind)}</td>
+      <td>${escapeHtml(s.name)}</td>
+      <td>${contextCell(s)}</td>
+      <td><code>${escapeHtml(s.cron)}</code></td>
+      <td>${s.next_run_time ? new Date(s.next_run_time).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' }) + '<br><span class="card-row-meta-inline">' + relTime(s.next_run_time) + '</span>' : "—"}</td>
+      <td>${statusCell(s)}</td>
+    </tr>`;
+  }
+  html += '</tbody></table>';
+  box.innerHTML = html;
+}
+
+loadSchedules();
+</script>
+{% endblock %}
