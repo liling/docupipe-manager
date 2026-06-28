@@ -13,6 +13,7 @@ const tid = root.dataset.taskId;
   });
   const cronInput = document.querySelector('[name="schedule_cron"]');
   const enabledCheck = document.querySelector('[name="schedule_enabled"]');
+  const cronEditBtn = document.getElementById("cron-edit-btn");
 
   if (tid) {
     const r = await fetch(`${API_PREFIX}/api/projects/${pid}/tasks/${tid}`);
@@ -27,9 +28,15 @@ const tid = root.dataset.taskId;
     f.elements.slug.readOnly = true;
   }
 
-  cronInput.disabled = !enabledCheck.checked;
-  enabledCheck.addEventListener("change", () => {
-    cronInput.disabled = !enabledCheck.checked;
+  function syncCronEnabled() {
+    var on = enabledCheck.checked;
+    cronInput.disabled = !on;
+    cronEditBtn.disabled = !on;
+  }
+  syncCronEnabled();
+  enabledCheck.addEventListener("change", syncCronEnabled);
+  cronEditBtn.addEventListener("click", function () {
+    if (window.CronEditor) CronEditor.open(cronInput);
   });
 })();
 

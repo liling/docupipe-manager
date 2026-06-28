@@ -27,6 +27,7 @@
           <input type="checkbox" name="schedule_enabled" checked> 调度 cron
         </label>
         <input name="schedule_cron" placeholder="如 0 3 * * *" class="form-control" disabled>
+        <button type="button" id="cron-edit-btn" class="btn btn-secondary" disabled>图形编辑</button>
       </div>
     </div>
     <div class="form-row">
@@ -54,5 +55,36 @@
     </div>
   </form>
 </div>
+<dialog id="cron-editor-dialog" class="cron-dialog">
+  <form method="dialog" id="cron-editor-form">
+    <h3 style="margin-top:0">Cron 调度编辑器</h3>
+
+    <div class="cron-section">
+      <div class="cron-section-label">快捷模板</div>
+      <div class="cron-templates" id="cron-templates"></div>
+    </div>
+
+    <div class="cron-section">
+      <div class="cron-section-label">字段</div>
+      <div id="cron-fields"></div>
+    </div>
+
+    <div class="cron-section cron-preview">
+      <div class="cron-section-label">预览</div>
+      <div class="cron-expr" id="cron-expr">0 3 * * *</div>
+      <div class="cron-desc" id="cron-desc">每天凌晨 3:00</div>
+      <div class="cron-next-label">下次执行</div>
+      <ul class="cron-next" id="cron-next"></ul>
+    </div>
+
+    <div class="form-actions" style="margin-top:14px">
+      <button type="button" value="cancel" id="cron-cancel" class="btn btn-secondary">取消</button>
+      <button type="button" value="ok" id="cron-ok" class="btn btn-primary">确定</button>
+    </div>
+  </form>
+</dialog>
+<script src="/docupipe/static/vendor/cronstrue/cronstrue.min.js"></script>
+<script src="/docupipe/static/vendor/cronstrue/zh_CN.min.js"></script>
+<script src="/docupipe/static/js/cron_editor.js"></script>
 <script src="/docupipe/static/js/task_form.js"></script>
 {% endblock %}
