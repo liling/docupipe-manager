@@ -8,6 +8,17 @@ import pytest
 from tests.conftest import override_get_current_user, clear_overrides
 
 
+def _detail_row(run, job, task):
+    """_run_detail raw SQL row（16 列，匹配 runs.py 的 SELECT 顺序）。"""
+    return (
+        run.id, run.task_id, run.pipeline_name, run.mode,
+        job.status, job.exit_code, job.command_text,
+        job.started_at, job.completed_at, job.error_message,
+        job.log_path, job.created_at, job.trigger_type, job.triggered_by,
+        task.name, task.project_id,
+    )
+
+
 @pytest.mark.asyncio
 async def test_list_runs_admin(async_client):
     override_get_current_user({"id": str(uuid.uuid4()), "role": "admin"})
@@ -123,8 +134,7 @@ async def test_get_run_includes_command_and_task_name(async_client):
         mock_conn = AsyncMock()
         mock_conn.execute = AsyncMock(side_effect=[
             MagicMock(one_or_none=MagicMock(return_value=(run_mock, job_mock))),  # access
-            MagicMock(one_or_none=MagicMock(return_value=(run_mock, job_mock))),  # detail
-            MagicMock(one_or_none=MagicMock(return_value=task_mock)),
+            MagicMock(one_or_none=MagicMock(return_value=_detail_row(run_mock, job_mock, task_mock))),  # detail
         ])
         mock_engine = MagicMock()
         mock_engine.begin.return_value.__aenter__ = AsyncMock(return_value=mock_conn)
@@ -175,10 +185,8 @@ async def test_stream_completed_run_reads_file(async_client, tmp_path):
         mock_conn = AsyncMock()
         mock_conn.execute = AsyncMock(side_effect=[
             MagicMock(one_or_none=MagicMock(return_value=(run_mock, job_mock))),  # access
-            MagicMock(one_or_none=MagicMock(return_value=(run_mock, job_mock))),  # detail(meta)
-            MagicMock(one_or_none=MagicMock(return_value=task_mock)),
-            MagicMock(one_or_none=MagicMock(return_value=(run_mock, job_mock))),  # detail(end)
-            MagicMock(one_or_none=MagicMock(return_value=task_mock)),
+            MagicMock(one_or_none=MagicMock(return_value=_detail_row(run_mock, job_mock, task_mock))),  # detail(meta)
+            MagicMock(one_or_none=MagicMock(return_value=_detail_row(run_mock, job_mock, task_mock))),  # detail(end)
         ])
         mock_engine = MagicMock()
         mock_engine.begin.return_value.__aenter__ = AsyncMock(return_value=mock_conn)
@@ -233,10 +241,8 @@ async def test_stream_active_run_replays_history_then_live_then_end(async_client
         mock_conn = AsyncMock()
         mock_conn.execute = AsyncMock(side_effect=[
             MagicMock(one_or_none=MagicMock(return_value=(run_mock, job_mock))),  # access
-            MagicMock(one_or_none=MagicMock(return_value=(run_mock, job_mock))),  # detail(meta)
-            MagicMock(one_or_none=MagicMock(return_value=task_mock)),
-            MagicMock(one_or_none=MagicMock(return_value=(run_mock, job_mock))),  # detail(end)
-            MagicMock(one_or_none=MagicMock(return_value=task_mock)),
+            MagicMock(one_or_none=MagicMock(return_value=_detail_row(run_mock, job_mock, task_mock))),  # detail(meta)
+            MagicMock(one_or_none=MagicMock(return_value=_detail_row(run_mock, job_mock, task_mock))),  # detail(end)
         ])
         mock_engine = MagicMock()
         mock_engine.begin.return_value.__aenter__ = AsyncMock(return_value=mock_conn)
