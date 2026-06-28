@@ -82,7 +82,7 @@
   }
 
   function buildTemplates() {
-    templatesEl.innerHTML = "";
+    DP.clear(templatesEl);
     TEMPLATES.forEach(function (t) {
       var b = document.createElement("button");
       b.type = "button";
@@ -109,7 +109,7 @@
   }
 
   function renderFields() {
-    fieldsEl.innerHTML = "";
+    DP.clear(fieldsEl);
     var row = document.createElement("div");
     row.className = "cron-fields-row";
 
@@ -241,7 +241,7 @@
     })
       .then(function (r) { return r.json(); })
       .then(function (data) {
-        nextEl.innerHTML = "";
+        DP.clear(nextEl);
         if (!data.valid) {
           var li = document.createElement("li");
           li.textContent = data.error || "无效";
@@ -257,7 +257,7 @@
         });
       })
       .catch(function () {
-        nextEl.innerHTML = '<li style="color:var(--error-text)">预览失败</li>';
+        DP.fill(nextEl, DP.el("li", {style: "color:var(--error-text)", text: "预览失败"}));
       });
   }
 
