@@ -284,12 +284,11 @@ class RunnerService:
             )
             await session.commit()
 
-        event = f"docupipe.run.{'success' if job_status == JobStatus.succeeded else 'fail'}"
         asyncio.create_task(self._platform_client.push_audit({
-            "event": event,
-            "run_id": str(run_id),
-            "task_id": str(task_id),
-            "exit_code": exit_code,
+            "action": "run.complete",
+            "resource_type": "run",
+            "resource_id": str(run_id),
+            "detail": {"task_id": str(task_id), "exit_code": exit_code},
         }))
 
     async def _do_execute(self, run_id: uuid.UUID) -> None:

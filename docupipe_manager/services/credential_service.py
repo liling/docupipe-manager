@@ -164,9 +164,10 @@ class CredentialService:
         self._cleanup_session(session_key)
 
         asyncio.create_task(self._platform_client.push_audit({
-            "event": "docupipe.credential.create",
-            "credential_id": str(credential.id),
-            "name": name,
+            "action": "credential.create",
+            "resource_type": "credential",
+            "resource_id": str(credential.id),
+            "detail": {"name": name},
         }))
 
         return credential
@@ -198,10 +199,10 @@ class CredentialService:
             await db_session.refresh(credential)
 
         asyncio.create_task(self._platform_client.push_audit({
-            "event": "docupipe.credential.create",
-            "credential_id": str(credential.id),
-            "name": name,
-            "source": "import",
+            "action": "credential.create",
+            "resource_type": "credential",
+            "resource_id": str(credential.id),
+            "detail": {"name": name, "source": "import"},
         }))
         return credential
 
@@ -387,8 +388,10 @@ class CredentialService:
                 await session.commit()
 
             asyncio.create_task(self._platform_client.push_audit({
-                "event": "docupipe.credential.refresh.success",
-                "credential_id": str(credential_id), "job_id": str(job.id),
+                "action": "credential.refresh",
+                "resource_type": "credential",
+                "resource_id": str(credential_id),
+                "detail": {"status": "success", "job_id": str(job.id)},
             }))
         except Exception as e:
             logger.warning("Keepalive failed for %s: %s", credential_id, e)
@@ -401,8 +404,10 @@ class CredentialService:
             except Exception:
                 pass
             asyncio.create_task(self._platform_client.push_audit({
-                "event": "docupipe.credential.refresh.fail",
-                "credential_id": str(credential_id), "error": str(e)[:2048],
+                "action": "credential.refresh",
+                "resource_type": "credential",
+                "resource_id": str(credential_id),
+                "detail": {"status": "fail", "error": str(e)[:2048]},
             }))
 
     async def revoke(self, credential_id: uuid.UUID, user_id: uuid.UUID, project_id: uuid.UUID) -> None:
@@ -415,8 +420,9 @@ class CredentialService:
             await db_session.commit()
 
         asyncio.create_task(self._platform_client.push_audit({
-            "event": "docupipe.credential.revoke",
-            "credential_id": str(credential_id),
+            "action": "credential.revoke",
+            "resource_type": "credential",
+            "resource_id": str(credential_id),
         }))
 
     async def rename_credential(
