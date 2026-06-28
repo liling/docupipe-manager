@@ -10,6 +10,15 @@
     <div class="empty-state">加载中...</div>
 </div>
 <script>
+function escapeHtml(s) {
+  if (s == null) return "";
+  return String(s)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
 function kindTag(k) {
   return k === "keepalive" ? "Keepalive" : "Task";
 }
@@ -34,10 +43,10 @@ function relTime(iso) {
 function contextCell(s) {
   if (s.kind === "task") {
     const p = s.context.project_name
-      ? `<a href="/docupipe/projects/${s.context.project_id}">${s.context.project_name}</a>` : "—";
-    return `${p} / ${s.context.task_name || "—"}`;
+      ? `<a href="/docupipe/projects/${escapeHtml(s.context.project_id)}">${escapeHtml(s.context.project_name)}</a>` : "—";
+    return `${p} / ${escapeHtml(s.context.task_name || "—")}`;
   }
-  return `凭证：${s.context.credential_name || "—"}（${s.context.credential_status}）`;
+  return `凭证：${escapeHtml(s.context.credential_name || "—")}（${escapeHtml(s.context.credential_status)}）`;
 }
 
 async function loadSchedules() {
@@ -68,9 +77,9 @@ async function loadSchedules() {
   for (const s of data.schedules) {
     html += `<tr>
       <td>${kindTag(s.kind)}</td>
-      <td>${s.name}</td>
+      <td>${escapeHtml(s.name)}</td>
       <td>${contextCell(s)}</td>
-      <td><code>${s.cron}</code></td>
+      <td><code>${escapeHtml(s.cron)}</code></td>
       <td>${s.next_run_time ? new Date(s.next_run_time).toLocaleString() + '<br><span class="card-row-meta-inline">' + relTime(s.next_run_time) + '</span>' : "—"}</td>
       <td>${statusCell(s)}</td>
     </tr>`;

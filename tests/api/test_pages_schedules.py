@@ -10,4 +10,7 @@ def test_schedules_page_route_and_template():
     template = (Path(__file__).resolve().parents[2]
                 / "docupipe_manager" / "templates" / "docupipe" / "schedules.html")
     assert template.is_file(), f"missing template: {template}"
-    assert '{% extends "base.html" %}' in template.read_text(encoding="utf-8")
+    src = template.read_text(encoding="utf-8")
+    assert '{% extends "base.html" %}' in src
+    assert "function escapeHtml" in src
+    assert "escapeHtml(" in src
