@@ -256,6 +256,7 @@ from docupipe_manager.api.members import router as members_router, users_router
 from docupipe_manager.api.stats import router as stats_router
 from docupipe_manager.api.tasks import router as tasks_router
 from docupipe_manager.api.env_vars import router as env_vars_router
+from docupipe_manager.api.cron import router as cron_router
 from docupipe_manager.api.schedules import router as schedules_router
 
 app.include_router(auth_router, prefix="/docupipe")
@@ -270,6 +271,7 @@ app.include_router(stats_router, prefix="/docupipe")
 app.include_router(tasks_router, prefix="/docupipe")
 app.include_router(env_vars_router, prefix="/docupipe")
 app.include_router(schedules_router, prefix="/docupipe")
+app.include_router(cron_router, prefix="/docupipe")
 
 
 @app.get("/")
