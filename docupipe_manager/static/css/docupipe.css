@@ -307,3 +307,53 @@ dialog {
   margin: auto;
 }
 dialog::backdrop { background: rgba(0,0,0,0.3); }
+
+/* ── Cron 编辑器 dialog ── */
+.cron-dialog { max-width: 560px; }
+.cron-dialog h3 { font-size: 17px; font-weight: 700; color: var(--text); }
+.cron-section { margin-bottom: 16px; }
+.cron-section-label {
+  font-size: 12.5px; font-weight: 600; color: var(--text-secondary);
+  margin-bottom: 8px; text-transform: uppercase; letter-spacing: .03em;
+}
+.cron-templates { display: flex; flex-wrap: wrap; gap: 8px; }
+.cron-tpl-btn {
+  padding: 6px 12px; font-size: 13px; font-family: var(--font);
+  border: 1px solid var(--border); border-radius: var(--radius-sm);
+  background: var(--surface); color: var(--text); cursor: pointer;
+  transition: border-color var(--transition), background var(--transition);
+}
+.cron-tpl-btn:hover { border-color: var(--primary); }
+.cron-tpl-btn.is-active {
+  background: var(--primary-light); border-color: var(--primary);
+  color: var(--primary); font-weight: 600;
+}
+.cron-fields-row { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; }
+.cron-field { display: flex; flex-direction: column; gap: 4px; }
+.cron-field label { font-size: 12px; color: var(--text-secondary); }
+.cron-field input, .cron-field select {
+  padding: 6px 10px; border: 1px solid var(--border);
+  border-radius: var(--radius-sm); font-size: 13px; width: 90px;
+  font-family: var(--font); background: var(--surface); color: var(--text);
+}
+.cron-weekdays { display: flex; gap: 6px; }
+.cron-wd {
+  width: 32px; height: 32px; display: inline-flex; align-items: center;
+  justify-content: center; border: 1px solid var(--border); border-radius: 50%;
+  background: var(--surface); cursor: pointer; font-size: 13px; color: var(--text);
+  transition: background var(--transition), color var(--transition);
+}
+.cron-wd.is-active { background: var(--primary); color: #fff; border-color: var(--primary); }
+.cron-expr {
+  font-family: 'SF Mono', 'Fira Code', monospace; font-size: 14px;
+  background: var(--bg); padding: 8px 12px; border-radius: var(--radius-sm);
+  color: var(--text); margin-bottom: 8px;
+}
+.cron-desc { font-size: 14px; color: var(--primary); font-weight: 600; margin-bottom: 10px; }
+.cron-desc.is-error { color: var(--error-text); }
+.cron-next-label { font-size: 12px; color: var(--text-muted); margin-bottom: 4px; }
+.cron-next { list-style: none; margin: 0; padding: 0; }
+.cron-next li {
+  font-size: 12.5px; color: var(--text-secondary); padding: 2px 0;
+  font-family: 'SF Mono', 'Fira Code', monospace;
+}
