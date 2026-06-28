@@ -80,7 +80,7 @@ async function loadSchedules() {
       <td>${escapeHtml(s.name)}</td>
       <td>${contextCell(s)}</td>
       <td><code>${escapeHtml(s.cron)}</code></td>
-      <td>${s.next_run_time ? new Date(s.next_run_time).toLocaleString() + '<br><span class="card-row-meta-inline">' + relTime(s.next_run_time) + '</span>' : "—"}</td>
+      <td>${s.next_run_time ? new Date(s.next_run_time).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' }) + '<br><span class="card-row-meta-inline">' + relTime(s.next_run_time) + '</span>' : "—"}</td>
       <td>${statusCell(s)}</td>
     </tr>`;
   }
