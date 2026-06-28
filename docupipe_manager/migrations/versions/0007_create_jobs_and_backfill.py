@@ -45,9 +45,9 @@ def upgrade() -> None:
         "INSERT INTO docupipe_manager.jobs "
         "(id, kind, status, pid, exit_code, started_at, completed_at, log_path, "
         " command_text, error_message, trigger_type, triggered_by, created_at) "
-        "SELECT id, 'docupipe_run', status, pid, exit_code, started_at, completed_at, "
-        "       log_path, command_text, error_message, trigger_type, triggered_by, created_at "
-        "FROM docupipe_manager.pipeline_runs"
+         "SELECT pr.id, 'docupipe_run', pr.status::text::docupipe_manager.job_status, pr.pid, pr.exit_code, pr.started_at, pr.completed_at, "
+         "       pr.log_path, pr.command_text, pr.error_message, pr.trigger_type::text::docupipe_manager.job_trigger_type, pr.triggered_by, pr.created_at "
+         "FROM docupipe_manager.pipeline_runs pr"
     )
 
     # 4. pipeline_runs.job_id（共享 id）+ FK + 唯一
