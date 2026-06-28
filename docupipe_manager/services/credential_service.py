@@ -3,6 +3,7 @@ import binascii
 import json
 import logging
 import os
+import re
 import shutil
 import time
 import uuid
@@ -38,6 +39,32 @@ def _parse_dt(s: str | None) -> datetime | None:
         return None
 
 
+_DEVICE_USER_CODE_RE = re.compile(r"authorization code:\s*([A-Z0-9-]+)")
+_DEVICE_URL_RE = re.compile(r"https://\S*user_code=\S+")
+_DEVICE_EXPIRES_RE = re.compile(r"expire in (\d+) seconds")
+_DEVICE_ERR_RE = re.compile(r'"message"\s*:\s*"([^"]+)"')
+
+
+def _parse_device_code_from_stderr(text: str) -> dict | None:
+    """从 dws device flow 的 stderr 文本解析验证码信息；code 与 url 均出现才返回。"""
+    code_match = _DEVICE_USER_CODE_RE.search(text)
+    url_match = _DEVICE_URL_RE.search(text)
+    if not code_match or not url_match:
+        return None
+    exp_match = _DEVICE_EXPIRES_RE.search(text)
+    return {
+        "user_code": code_match.group(1),
+        "verification_url": url_match.group(0),
+        "expires_in": int(exp_match.group(1)) if exp_match else None,
+    }
+
+
+def _parse_device_error(text: str) -> str | None:
+    """从 dws stderr 末尾的 JSON 提取 error.message；无则 None。"""
+    m = _DEVICE_ERR_RE.search(text)
+    return m.group(1) if m else None
+
+
 class CredentialService:
     """Manage dws credential lifecycle via device flow."""
 
@@ -49,28 +76,57 @@ class CredentialService:
         self._active_sessions: dict[str, dict] = {}
 
     async def start_device_login(self, project_id: uuid.UUID, name: str) -> dict:
-        """Start dws auth login --device, return verification_url + user_code + session_key."""
+        """Start dws auth login --device, read the verification code from stderr.
+
+        dws device flow writes the verification UI (link + user_code) and all
+        progress to stderr; stdout stays empty. Read stderr line-by-line until
+        the code is parsed, then spawn a drain task that keeps consuming stderr
+        so the pipe never blocks dws, and lets poll() read the final result
+        after the process exits.
+        """
         session_key = uuid.uuid4().hex
         root = mkdtemp(prefix="dws-device-")
         env = make_dws_env(root)
 
         proc = await asyncio.create_subprocess_exec(
             self._settings.dws_cli_path, "auth", "login", "--device",
-            "--format", "json",
             stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
             env=env, cwd=root,
         )
 
+        stderr_lines: list[str] = []
+        code_info: dict | None = None
         try:
-            first_chunk = await asyncio.wait_for(proc.stdout.readline(), timeout=30)
-            info = json.loads(first_chunk)
-        except Exception as e:
+            while True:
+                line = await asyncio.wait_for(proc.stderr.readline(), timeout=60)
+                if not line:
+                    break
+                stderr_lines.append(line.decode("utf-8", "replace"))
+                code_info = _parse_device_code_from_stderr("".join(stderr_lines))
+                if code_info:
+                    break
+        except Exception:
             proc.kill()
             shutil.rmtree(root, ignore_errors=True)
-            raise ValueError(f"Failed to start device login: {e}") from e
+            raise
+        if not code_info:
+            proc.kill()
+            shutil.rmtree(root, ignore_errors=True)
+            raise ValueError(
+                "Failed to start device login: dws exited without emitting a verification code"
+            )
+
+        async def _drain_stderr() -> None:
+            while True:
+                line = await proc.stderr.readline()
+                if not line:
+                    break
+                stderr_lines.append(line.decode("utf-8", "replace"))
 
         self._active_sessions[session_key] = {
             "proc": proc,
+            "stderr_lines": stderr_lines,
+            "stderr_task": asyncio.create_task(_drain_stderr()),
             "root": root,
             "env": env,
             "name": name,
@@ -78,32 +134,32 @@ class CredentialService:
             "created_at": time.monotonic(),
         }
 
-        return {"session_key": session_key, **info}
+        return {"session_key": session_key, **code_info}
 
     async def poll_device_login(self, session_key: str) -> dict:
-        """Check device login status. Returns {"status": "pending" | "success" | "failed"}."""
+        """Check device login status by inspecting the dws process exit code.
+
+        dws runs the whole device flow itself (display code + poll DingTalk).
+        While running → pending; exit 0 → success (token already written into
+        the isolated env); non-zero → failed, with the error parsed from stderr.
+        """
         session = self._active_sessions.get(session_key)
         if session is None:
             return {"status": "failed", "error": "Session not found"}
 
         proc = session["proc"]
-        retcode = proc.returncode
-        if retcode is None:
+        if proc.returncode is None:
             return {"status": "pending"}
 
-        if retcode != 0:
-            self._cleanup_session(session_key)
-            return {"status": "failed", "error": f"dws exited with code {retcode}"}
+        # 进程已结束：等 drain task 收完 stderr 再判定
+        await session["stderr_task"]
+        if proc.returncode == 0:
+            return {"status": "success"}
 
-        stdout, _ = await proc.communicate()
-        try:
-            result = json.loads(stdout.decode())
-        except (json.JSONDecodeError, UnicodeDecodeError):
-            self._cleanup_session(session_key)
-            return {"status": "failed", "error": "Failed to parse dws output"}
-
-        session["result"] = result
-        return {"status": "success", "result": result}
+        stderr_text = "".join(session["stderr_lines"])
+        err = _parse_device_error(stderr_text)
+        self._cleanup_session(session_key)
+        return {"status": "failed", "error": err or f"dws exited with code {proc.returncode}"}
 
     async def finalize_login(self, session_key: str, name: str, user_id: uuid.UUID, project_id: uuid.UUID) -> DwsCredential:
         """Complete login: read dws status, export auth blob, SM4 encrypt, store in DB."""
@@ -440,6 +496,9 @@ class CredentialService:
     def _cleanup_session(self, session_key: str) -> None:
         session = self._active_sessions.pop(session_key, None)
         if session:
+            task = session.get("stderr_task")
+            if task is not None and not task.done():
+                task.cancel()
             proc = session.get("proc")
             if proc and proc.returncode is None:
                 proc.kill()
