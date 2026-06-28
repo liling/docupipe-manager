@@ -81,21 +81,31 @@
     state.template = "custom";
   }
 
-  function renderTemplates() {
+  function buildTemplates() {
     templatesEl.innerHTML = "";
     TEMPLATES.forEach(function (t) {
       var b = document.createElement("button");
       b.type = "button";
+      b.dataset.tpl = t.id;
       b.className = "cron-tpl-btn" + (state.template === t.id ? " is-active" : "");
       b.textContent = t.label;
       b.addEventListener("click", function () {
+        if (state.template === t.id) return;
         state.template = t.id;
-        renderTemplates();
+        updateTemplateActive();
         renderFields();
         schedulePreview();
       });
       templatesEl.appendChild(b);
     });
+  }
+
+  function updateTemplateActive() {
+    var btns = templatesEl.querySelectorAll(".cron-tpl-btn");
+    for (var i = 0; i < btns.length; i++) {
+      var on = btns[i].dataset.tpl === state.template;
+      btns[i].classList.toggle("is-active", on);
+    }
   }
 
   function renderFields() {
@@ -162,7 +172,8 @@
           var i = state.weekdays.indexOf(idx);
           if (i >= 0) { if (state.weekdays.length > 1) state.weekdays.splice(i, 1); }
           else state.weekdays.push(idx);
-          renderFields(); schedulePreview();
+          b.classList.toggle("is-active", state.weekdays.indexOf(idx) >= 0);
+          schedulePreview();
         });
         group.appendChild(b);
       });
@@ -223,7 +234,6 @@
   }
 
   function fetchNextRuns(expr) {
-    nextEl.innerHTML = '<li>计算中…</li>';
     fetch(API_PREFIX + "/api/cron/preview", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -269,7 +279,7 @@
   function open(input) {
     targetInput = input;
     parseIntoState(input.value);
-    renderTemplates();
+    updateTemplateActive();
     renderFields();
     schedulePreview();
     dialog.showModal();
@@ -284,6 +294,7 @@
     descEl = $("#cron-desc");
     nextEl = $("#cron-next");
     okBtn = $("#cron-ok");
+    buildTemplates();
 
     $("#cron-cancel").addEventListener("click", function () { dialog.close(); });
     okBtn.addEventListener("click", confirmDialog);
