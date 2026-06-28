@@ -45,7 +45,7 @@
 | next_run_time | 取自 APScheduler，含 jitter 后实际时间（不自行用 croniter 计算） |
 | 条目形状 | Task / Keepalive 两种调度合并为统一 schedule 条目，前端只渲染一种列表 |
 | 排序 | 按 `next_run_time` 升序（最快要执行的排最前） |
-| 权限 | 沿用现有模型：Task 调度按 project member 可见性过滤；Keepalive 按 credential.project_id 过滤；admin 看全部 |
+| 权限 | **admin-only**（系统级视图，不按 project member 过滤）；页面与 API 均用 `require_admin` |
 | 漂移检测 | 方案 A 的额外价值：标记「配置 enabled 但未注册」的异常态 |
 | 位置 | 新增独立页面 `/docupipe/schedules` + 导航入口 |
 | keepalive cron 来源 | 顶部摘要展示全局 `credential_keepalive_cron` 设置 |
@@ -118,35 +118,26 @@ GET /api/schedules
 - 排序：按 `next_run_time` 升序（None 排末尾）——「计划视图」最自然的排序。
 - 无分页。
 
-**权限过滤**：
-- Task 调度：非 admin 只看到自己有 member 权限的 project 下的 task 调度（与现有 runs/tasks 可见性规则一致）。
-- Keepalive 调度：admin 看全部；非 admin 只看到自己所属 project 下的 credential 的 keepalive（经 `credential.project_id` 过滤）。
-- 不引入新的越权面。
+**权限**：`require_admin` 守卫（与 `projects/new` 等管理页一致）。本视图是系统级的——keepalive 节奏来自全局配置、Task 调度跨所有 project——不按 project member 过滤。
 
 ## 后端服务变更
 
 ### `SchedulerService.list_schedules`（`services/scheduler_service.py`）
 
 ```python
-async def list_schedules(
-    self,
-    visible_task_ids: set[uuid.UUID] | None = None,        # None = 不过滤(全部)
-    visible_credential_ids: set[uuid.UUID] | None = None,   # None = 不过滤(全部)
-) -> list[dict]:
+async def list_schedules(self) -> list[dict]:
     """读取 APScheduler 运行时状态 + DB enrich，返回统一 schedule 条目。
-    权限过滤由 API 层算好可见 id 集合后传入，避免本层耦合 auth。"""
+    admin-only，无权限过滤参数——守卫在 API 层。"""
     # 1. self._scheduler.get_jobs() 拿全部已注册 job
     # 2. 按 id 前缀分两组：task- / keepalive-
-    # 3. 批量查 DB（仅查可见 id 集合内的）：
+    # 3. 批量查 DB：
     #    - task- → JOIN Task + Project 取 name/slug/project_name/schedule_enabled
     #    - keepalive- → 查 DwsCredential 取 name/status
     # 4. 从 CronTrigger 重建标准 crontab 字符串（trigger.fields）
     # 5. 组装统一条目（next_run_time 来自 APScheduler job）
-    # 6. 漂移检测：可见且 schedule_enabled=true 的 task 但 APScheduler 无对应 job → registered=false
+    # 6. 漂移检测：schedule_enabled=true 的 task 但 APScheduler 无对应 job → registered=false
     # 7. 返回（排序交给 API 层）
 ```
-
-> `visible_*` 为 `None` 时不过滤（admin 全量）；非 None 时仅返回集合内的，service 层不查 auth。
 
 ### `api/schedules.py`（新建）
 
@@ -154,12 +145,11 @@ async def list_schedules(
 router = APIRouter(prefix="/api/schedules", tags=["schedules"])
 
 @router.get("")
-async def list_schedules(user: dict = Depends(get_current_user)):
-    # 1. 计算当前用户可见的 task_id 集合 / credential_id 集合（admin=全部）
-    # 2. scheduler = deps.get_scheduler()
-    # 3. items = await scheduler.list_schedules(visible_task_ids, visible_credential_ids)
-    # 4. 按 next_run_time 升序排序（None 末尾）
-    # 5. return {"schedules": items, "count": len(items)}
+async def list_schedules(user: dict = Depends(require_admin)):
+    # 1. scheduler = deps.get_scheduler()
+    # 2. items = await scheduler.list_schedules()
+    # 3. 按 next_run_time 升序排序（None 末尾）
+    # 4. return {"schedules": items, "count": len(items)}
 ```
 
 ### 装配
@@ -170,8 +160,8 @@ async def list_schedules(user: dict = Depends(get_current_user)):
 
 ### 页面（`templates/docupipe/schedules.html` + `api/pages.py` 路由）
 
-- 路由 `GET /docupipe/schedules`（`pages.py` 加一行）。
-- 导航菜单新增「调度 / Schedules」入口（与现有 nav_menu 装配一致）。
+- 路由 `GET /docupipe/schedules`（`pages.py` 加一行），用 `require_admin` 守卫。
+- 导航菜单新增「调度 / Schedules」入口（与现有 nav_menu 装配一致）。入口对所有用户可见，非 admin 点进去由 `require_admin` 拦截（与现有 admin 页行为一致）。
 - 单列表，每行一个 schedule，列：
   - 类型徽标（Task / Keepalive）
   - 名称
@@ -197,12 +187,12 @@ async def list_schedules(user: dict = Depends(get_current_user)):
 
 | 层 | 文件 | 覆盖点 |
 |---|---|---|
-| service | `tests/services/test_scheduler_service.py`（追加） | mock `get_jobs()` 返回 task-/keepalive- 两类 job，验证 enrich 后条目形状、`registered` 标记、cron 提取正确；权限过滤参数生效 |
+| service | `tests/services/test_scheduler_service.py`（追加） | mock `get_jobs()` 返回 task-/keepalive- 两类 job，验证 enrich 后条目形状、`registered` 标记、cron 提取正确 |
 | 边界 | 同上 | `next_run_time=None`（已暂停）仍列出并标记；DB 有 task 但 APScheduler 无对应 job → `registered=false` |
-| API | `tests/api/test_schedules.py`（新建） | admin 看全部；非 admin 只看到授权 project 的 task 调度 + 自己 project 的 credential keepalive；排序按 next_run_time 升序（None 末尾） |
+| API | `tests/api/test_schedules.py`（新建） | admin 可访问、返回全部；非 admin 被拒（403/重定向）；排序按 next_run_time 升序（None 末尾） |
 
 ## 风险与权衡
 
 1. **运行时状态 vs 配置漂移**：方案 A 展示的是 APScheduler 实际状态，若与 DB 配置不一致会直接暴露为 `registered=false`。这是特性而非缺陷——帮助发现隐藏问题。
 2. **进程内存状态**：重启后短暂为空。缓解：`_reload_all` 启动时重建；页面在 scheduler 未就绪时显示空态即可。
-3. **权限模型复杂度**：keepalive 按 `credential.project_id` 过滤是新增逻辑，但与 Task 调度的 project member 模型对称，不引入新模式。
+3. **admin-only 可见性**：系统级视图仅 admin 可见，普通用户看不到全局调度计划。这是有意的取舍——keepalive 节奏是全局配置，对非 admin 暴露部分视图会制造困惑。
