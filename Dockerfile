@@ -6,11 +6,11 @@ ARG DWS_VERSION=1.0.43
 
 # Stage: fetch dws (DingTalk workspace CLI) for the target arch
 FROM python:3.12-slim AS dws
-ARG TARGETARCH=amd64
 ARG DWS_VERSION
 RUN apt-get update && apt-get install -y --no-install-recommends curl ca-certificates \
+    && DWS_ARCH=$(dpkg --print-architecture) \
     && curl -fsSL -o /tmp/dws.tar.gz \
-       "https://github.com/DingTalk-Real-AI/dingtalk-workspace-cli/releases/download/v${DWS_VERSION}/dws-linux-${TARGETARCH}.tar.gz" \
+       "https://github.com/DingTalk-Real-AI/dingtalk-workspace-cli/releases/download/v${DWS_VERSION}/dws-linux-${DWS_ARCH}.tar.gz" \
     && tar -xzf /tmp/dws.tar.gz -C /usr/local/bin dws \
     && chmod +x /usr/local/bin/dws \
     && rm -rf /var/lib/apt/lists/*
