@@ -17,8 +17,8 @@ def test_schedules_page_route_and_template():
     assert template.is_file(), f"missing template: {template}"
     src = template.read_text(encoding="utf-8")
     assert '{% extends "base.html" %}' in src
-    assert "function escapeHtml" in src
-    assert "escapeHtml(" in src
+    assert "DP." in src
+    assert "escapeHtml" not in src
 
 
 @pytest.mark.asyncio

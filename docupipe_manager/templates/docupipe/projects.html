@@ -19,17 +19,16 @@ async function loadProjects() {
   const projects = await r.json();
   const box = document.getElementById("project-list");
   if (!projects.length) {
-    box.innerHTML = '<div class="empty-state">暂无可见的项目。</div>';
+    DP.fill(box, DP.el("div", {class: "empty-state", text: "暂无可见的项目。"}));
     return;
   }
-  box.innerHTML = projects.map(p => `
-    <a href="/docupipe/projects/${p.id}" class="card-row">
-      <div class="card-row-main">
-        <div><span class="card-row-title">${p.name}</span></div>
-        ${p.description ? `<div class="card-row-meta">${p.description}</div>` : ""}
-      </div>
-      <span class="status-tag ${p.status === 'active' ? 'is-success' : ''}">${p.status}</span>
-    </a>`).join("");
+  DP.fill(box, projects.map(p => DP.el("a", {href: `/docupipe/projects/${p.id}`, class: "card-row"},
+    DP.el("div", {class: "card-row-main"},
+      DP.el("div", {}, DP.el("span", {class: "card-row-title", text: p.name})),
+      p.description ? DP.el("div", {class: "card-row-meta", text: p.description}) : null
+    ),
+    DP.el("span", {class: `status-tag ${p.status === 'active' ? 'is-success' : ''}`, text: p.status})
+  )));
 }
 loadProjects();
 </script>

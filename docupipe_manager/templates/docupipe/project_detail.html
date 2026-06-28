@@ -56,12 +56,12 @@
   <script src="/docupipe/static/js/project_detail.js"></script>
   <dialog id="member-add-dialog">
     <h3 style="margin:0 0 16px">添加成员</h3>
-    <form onsubmit="confirmAddMember(event)">
+    <form id="member-add-form">
       <div class="form-group">
         <label>用户名</label>
         <div style="display:flex;gap:8px">
-          <input type="text" id="member-lookup-input" class="form-control" placeholder="输入用户名" autocomplete="off" oninput="onMemberLookupInput()" style="flex:1">
-          <button type="button" class="btn btn-secondary" onclick="lookupMember()">查找</button>
+          <input type="text" id="member-lookup-input" class="form-control" placeholder="输入用户名" autocomplete="off" style="flex:1">
+          <button type="button" class="btn btn-secondary" id="member-lookup-btn">查找</button>
         </div>
       </div>
       <div id="member-preview" class="member-preview" style="display:none"></div>
@@ -75,7 +75,7 @@
       <input type="hidden" id="member-lookup-id">
       <div class="form-actions" style="margin-top:16px">
         <button type="submit" id="member-add-submit" class="btn btn-sm btn-primary" disabled>添加</button>
-        <button type="button" class="btn btn-sm btn-secondary" onclick="hideMemberAddDialog()">取消</button>
+        <button type="button" class="btn btn-sm btn-secondary" id="member-cancel-btn">取消</button>
       </div>
     </form>
   </dialog>
@@ -95,5 +95,12 @@ document.querySelectorAll(".tab").forEach(b => b.addEventListener("click", () =>
   activateTab(b.dataset.tab);
   location.hash = b.dataset.tab;
 }));
+
+// Bind member-add-dialog handlers via addEventListener (no inline handlers)
+// Guard with ?. so the create-project page (mode=new, no dialog) doesn't throw
+document.getElementById("member-add-form")?.addEventListener("submit", confirmAddMember);
+document.getElementById("member-lookup-btn")?.addEventListener("click", lookupMember);
+document.getElementById("member-lookup-input")?.addEventListener("input", onMemberLookupInput);
+document.getElementById("member-cancel-btn")?.addEventListener("click", hideMemberAddDialog);
 </script>
 {% endblock %}

@@ -191,6 +191,25 @@ async def limit_request_body_size(request: Request, call_next):
     return await call_next(request)
 
 
+@app.middleware("http")
+async def content_security_policy(request: Request, call_next):
+    response = await call_next(request)
+    response.headers["Content-Security-Policy"] = (
+        "default-src 'self'; "
+        "script-src 'self' 'unsafe-inline'; "
+        "style-src 'self' 'unsafe-inline'; "
+        "img-src 'self' data: blob:; "
+        "font-src 'self' data:; "
+        "connect-src 'self'; "
+        "object-src 'none'; "
+        "base-uri 'self'; "
+        "form-action 'self'"
+    )
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    return response
+
+
 @app.exception_handler(HTTPException)
 async def page_auth_redirect(request: Request, exc: HTTPException):
     if exc.status_code == 401 and request.url.path.startswith("/docupipe/") and not request.url.path.startswith(

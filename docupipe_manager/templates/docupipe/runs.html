@@ -18,45 +18,56 @@ function statusTagClass(status) {
 
 let _runsPage = {page: 1};
 
+function renderRunsTable(data, box, pp) {
+  const totalPages = Math.ceil(data.total / data.page_size);
+  const rows = data.runs.map(run => DP.el("tr", {},
+    DP.el("td", {}, run.project_name
+      ? DP.el("a", {href: `/docupipe/projects/${run.project_id}`, text: run.project_name})
+      : "—"),
+    DP.el("td", {text: run.task_name || run.task_id.slice(0,8)}),
+    DP.el("td", {text: run.pipeline_name || "default"}),
+    DP.el("td", {text: run.mode}),
+    DP.el("td", {}, DP.el("span", {class: `status-tag ${statusTagClass(run.status)}`, text: run.status})),
+    DP.el("td", {text: run.started_at ? new Date(run.started_at).toLocaleString() : "—"}),
+    DP.el("td", {class: "action-cell"}, DP.el("a", {class: "btn btn-sm btn-secondary", href: `/docupipe/runs/${run.id}`, text: "详情"}))
+  ));
+
+  const pager = [];
+  if (pp > 1) pager.push(DP.el("button", {class: "btn btn-sm btn-secondary", id: "runs-prev", text: "上一页"}));
+  pager.push(DP.el("span", {class: "card-row-meta-inline", text: `第 ${pp}/${totalPages} 页`}));
+  if (pp < totalPages) pager.push(DP.el("button", {class: "btn btn-sm btn-secondary", id: "runs-next", text: "下一页"}));
+
+  DP.fill(box,
+    DP.el("div", {class: "members-header"},
+      DP.el("h3", {text: "运行历史"}),
+      DP.el("span", {class: "card-row-meta", text: `共 ${data.total} 条记录`})
+    ),
+    DP.el("table", {class: "data-table"},
+      DP.el("thead", {}, DP.el("tr", {},
+        ["项目","任务","流水线","模式","状态","开始时间","操作"].map(h => DP.el("th", {text: h}))
+      )),
+      DP.el("tbody", {}, rows)
+    ),
+    DP.el("div", {class: "form-actions", style: "margin-top:8px;align-items:center"}, pager)
+  );
+
+  box.querySelector("#runs-prev")?.addEventListener("click", () => { _runsPage.page--; loadRuns(); });
+  box.querySelector("#runs-next")?.addEventListener("click", () => { _runsPage.page++; loadRuns(); });
+}
+
 async function loadRuns() {
   const box = document.getElementById("runs-list");
   const pp = _runsPage.page;
   const r = await fetch(`${API_PREFIX}/api/runs?page=${pp}&page_size=20`);
-  if (!r.ok) { box.innerHTML = '<div class="empty-state">加载失败</div>'; return; }
+  if (!r.ok) { DP.fill(box, DP.el("div", {class: "empty-state", text: "加载失败"})); return; }
   const data = await r.json();
 
   if (!data.total) {
-    box.innerHTML = '<div class="empty-state">暂无运行记录。</div>';
+    DP.fill(box, DP.el("div", {class: "empty-state", text: "暂无运行记录。"}));
     _runsPage = {page: 1};
     return;
   }
-
-  let html = `<div class="members-header"><h3>运行历史</h3><span class="card-row-meta">共 ${data.total} 条记录</span></div>`;
-  html += '<table class="data-table"><thead><tr><th>项目</th><th>任务</th><th>流水线</th><th>模式</th><th>状态</th><th>开始时间</th><th>操作</th></tr></thead><tbody>';
-  for (const run of data.runs) {
-    html += `<tr>
-      <td>${run.project_name ? `<a href="/docupipe/projects/${run.project_id}">${run.project_name}</a>` : "—"}</td>
-      <td>${run.task_name || run.task_id.slice(0,8)}</td>
-      <td>${run.pipeline_name || "default"}</td>
-      <td>${run.mode}</td>
-      <td><span class="status-tag ${statusTagClass(run.status)}">${run.status}</span></td>
-      <td>${run.started_at ? new Date(run.started_at).toLocaleString() : "—"}</td>
-      <td class="action-cell"><a class="btn btn-sm btn-secondary" href="/docupipe/runs/${run.id}">详情</a></td>
-    </tr>`;
-  }
-  html += '</tbody></table>';
-
-  const totalPages = Math.ceil(data.total / data.page_size);
-  html += '<div class="form-actions" style="margin-top:8px;align-items:center">';
-  if (pp > 1) html += `<button class="btn btn-sm btn-secondary" id="runs-prev">上一页</button> `;
-  html += `<span class="card-row-meta-inline">第 ${pp}/${totalPages} 页</span>`;
-  if (pp < totalPages) html += ` <button class="btn btn-sm btn-secondary" id="runs-next">下一页</button>`;
-  html += '</div>';
-
-  box.innerHTML = html;
-
-  box.querySelector("#runs-prev")?.addEventListener("click", () => { _runsPage.page--; loadRuns(); });
-  box.querySelector("#runs-next")?.addEventListener("click", () => { _runsPage.page++; loadRuns(); });
+  renderRunsTable(data, box, pp);
 }
 
 loadRuns();
