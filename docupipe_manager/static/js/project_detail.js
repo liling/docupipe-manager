@@ -106,6 +106,7 @@ async function loadCredentials() {
   if (!creds.length) {
     kids.push(DP.el("div", {class: "empty-state", text: "暂无凭证。"}));
     DP.fill(box, kids);
+    document.getElementById("cred-add").addEventListener("click", function() { showCredentialDialog(); });
     return;
   }
 
