@@ -506,10 +506,9 @@
     if (openMenu) { dialog.removeChild(openMenu); openMenu = null; }
     var menu = stepTypeMenu(onPick, segment);
     var r = anchor.getBoundingClientRect();
-    var dr = dialog.getBoundingClientRect();
-    menu.style.position = "absolute";
-    menu.style.left = (r.left - dr.left) + "px";
-    menu.style.top = (r.bottom - dr.top + 4) + "px";
+    menu.style.position = "fixed";
+    menu.style.left = r.left + "px";
+    menu.style.top = (r.bottom + 4) + "px";
     dialog.appendChild(menu);
     openMenu = menu;
     setTimeout(function () {
@@ -546,10 +545,9 @@
     if (openHelp) { dialog.removeChild(openHelp); openHelp = null; }
     var bubble = DP.el("div", { class: "pe-help-bubble", text: text });
     var r = anchor.getBoundingClientRect();
-    var dr = dialog.getBoundingClientRect();
-    bubble.style.position = "absolute";
-    bubble.style.left = (r.left - dr.left) + "px";
-    bubble.style.top = (r.bottom - dr.top + 4) + "px";
+    bubble.style.position = "fixed";
+    bubble.style.left = r.left + "px";
+    bubble.style.top = (r.bottom + 4) + "px";
     dialog.appendChild(bubble);
     openHelp = bubble;
     setTimeout(function () {
