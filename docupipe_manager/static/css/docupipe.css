@@ -396,7 +396,7 @@ dialog::backdrop { background: rgba(0,0,0,0.3); }
   font-size: 13px; line-height: 18px; padding: 0;
 }
 .pe-add-step:hover { border-color: var(--accent, #4a90d9); color: var(--accent, #4a90d9); }
-.pe-add-step-row { margin-top: 8px; }
+.pe-add-step-row { margin-top: 8px; display: flex; gap: 8px; flex-wrap: wrap; }
 
 .pe-pipeline-opts { border: 1px solid var(--border); border-radius: 6px; padding: 10px; }
 .pe-opts-row { display: flex; gap: 14px; flex-wrap: wrap; }

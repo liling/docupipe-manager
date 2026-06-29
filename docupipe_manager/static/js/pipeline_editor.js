@@ -197,21 +197,41 @@
     }
     mainRow.appendChild(nodeCard("destination", p.destination.type, "destination", 0, { kindLabel: "目的地" }));
 
+    if (p.post_steps.length) {
+      mainRow.appendChild(arrow());
+      mainRow.appendChild(addStepButton(p.post_steps, "post_steps", 0));
+      p.post_steps.forEach(function (s, i) {
+        var card = nodeCard("step", s.name, "post_steps", i, {
+          kindLabel: "写入后", onDelete: function () { p.post_steps.splice(i, 1); selected = null; renderFlow(); }
+        });
+        makeDraggable(card, p.post_steps, i);
+        mainRow.appendChild(card);
+        mainRow.appendChild(arrow());
+        mainRow.appendChild(addStepButton(p.post_steps, "post_steps", i + 1));
+      });
+    }
+
     var mainWrap = DP.el("div", { class: "pe-segment" },
       DP.el("div", { class: "pe-segment-label", text: "文档流向" }), mainRow,
       DP.el("div", { class: "pe-add-step-row" },
-        DP.el("button", { type: "button", class: "btn btn-secondary btn-sm", text: "+ 添加步骤", onClick: function (e) {
+        DP.el("button", { type: "button", class: "btn btn-secondary btn-sm", text: "+ 添加处理步骤", onClick: function (e) {
           var btn = e.currentTarget;
           showStepMenu(btn, function (type) {
             p.steps.push({ name: type, kwargs: {} }); renderFlow();
           }, "steps");
+        } }),
+        DP.el("button", { type: "button", class: "btn btn-secondary btn-sm", text: "+ 添加写入后步骤", onClick: function (e) {
+          var btn = e.currentTarget;
+          showStepMenu(btn, function (type) {
+            p.post_steps.push({ name: type, kwargs: {} }); renderFlow();
+          }, "post_steps");
         } })
       )
     );
     flowEl.appendChild(mainWrap);
 
-    ["post_steps", "finalize_steps"].forEach(function (seg) {
-      var label = seg === "post_steps" ? "post_steps（写入后）" : "finalize_steps（全部完成后）";
+    ["finalize_steps"].forEach(function (seg) {
+      var label = "finalize_steps（全部完成后）";
       if (p[seg].length) {
         flowEl.appendChild(renderStepsSegment(seg, label));
       } else {
