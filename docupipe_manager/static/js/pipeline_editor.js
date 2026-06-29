@@ -173,9 +173,144 @@
     dialog.addEventListener("click", function (e) { if (e.target === dialog) dialog.close(); });
   }
 
+  var selected = null; // { segment, index }
+
   function renderFlow() {
     DP.clear(flowEl);
     DP.clear(paramsEl);
+    var p = activePipeline();
+    if (!p) return;
+
+    var mainRow = DP.el("div", { class: "pe-node-row pe-main-row" });
+    mainRow.appendChild(nodeCard("source", p.source.type, "source", 0, { kindLabel: "来源" }));
+    mainRow.appendChild(arrow());
+
+    if (p.steps.length) {
+      p.steps.forEach(function (s, i) {
+        mainRow.appendChild(nodeCard("step", s.name, "steps", i, {
+          kindLabel: "步骤", onDelete: function () { p.steps.splice(i, 1); selected = null; renderFlow(); }
+        }));
+        mainRow.appendChild(arrow());
+      });
+    }
+    mainRow.appendChild(nodeCard("destination", p.destination.type, "destination", 0, { kindLabel: "目的地" }));
+
+    var mainWrap = DP.el("div", { class: "pe-segment" },
+      DP.el("div", { class: "pe-segment-label", text: "文档流向" }), mainRow,
+      DP.el("div", { class: "pe-add-step-row" },
+        DP.el("button", { type: "button", class: "btn btn-secondary btn-sm", text: "+ 添加步骤", onClick: function () {
+          p.steps.push({ name: "convert", kwargs: {} }); renderFlow();
+        } })
+      )
+    );
+    flowEl.appendChild(mainWrap);
+
+    ["post_steps", "finalize_steps"].forEach(function (seg) {
+      var label = seg === "post_steps" ? "post_steps（写入后）" : "finalize_steps（全部完成后）";
+      if (p[seg].length) {
+        flowEl.appendChild(renderStepsSegment(seg, label));
+      } else {
+        flowEl.appendChild(DP.el("div", { class: "pe-segment pe-collapsed" },
+          DP.el("button", { type: "button", class: "btn btn-secondary btn-sm", text: "+ 添加 " + label, onClick: function () {
+            p[seg].push({ name: "convert", kwargs: {} }); renderFlow();
+          } })
+        ));
+      }
+    });
+
+    flowEl.appendChild(renderPipelineOptions(p));
+
+    renderParams();
+  }
+
+  function nodeLabel(kind, type) {
+    var def = PipelineSchema.findByType(kind, type);
+    return def ? def.label : (type ? type + "（未知）" : "未设置");
+  }
+
+  function nodeCard(kind, type, segment, index, opts) {
+    opts = opts || {};
+    var card = DP.el("div", {
+      class: "pe-node" + (selected && selected.segment === segment && selected.index === index ? " is-selected" : ""),
+      onClick: function () { selected = { segment: segment, index: index }; renderFlow(); }
+    },
+      DP.el("div", { class: "pe-node-kind", text: opts.kindLabel || kind }),
+      DP.el("div", { class: "pe-node-name", text: nodeLabel(kind, type) })
+    );
+    if (opts.onDelete) {
+      var x = DP.el("button", { type: "button", class: "pe-node-del", text: "×", onClick: function (e) { e.stopPropagation(); opts.onDelete(); } });
+      card.appendChild(x);
+    }
+    if (!type) card.classList.add("is-empty");
+    return card;
+  }
+
+  function arrow() {
+    return DP.el("div", { class: "pe-arrow", text: "→" });
+  }
+
+  function addStepButton(arr, segment, index) {
+    return DP.el("button", { type: "button", class: "pe-add-step", text: "+", onClick: function () {
+      arr.splice(index, 0, { name: "convert", kwargs: {} });
+      renderFlow();
+    } });
+  }
+
+  function renderStepsSegment(segment, kindLabel) {
+    var p = activePipeline(); if (!p) return null;
+    var arr = p[segment];
+    if (!arr.length && (segment === "post_steps" || segment === "finalize_steps")) {
+      return null;
+    }
+    var wrap = DP.el("div", { class: "pe-segment" },
+      DP.el("div", { class: "pe-segment-label", text: kindLabel })
+    );
+    var row = DP.el("div", { class: "pe-node-row" });
+    row.appendChild(addStepButton(arr, segment, 0));
+    arr.forEach(function (s, i) {
+      row.appendChild(nodeCard("step", s.name, segment, i, {
+        kindLabel: kindLabel,
+        onDelete: function () { arr.splice(i, 1); selected = null; renderFlow(); }
+      }));
+      row.appendChild(arrow());
+      row.appendChild(addStepButton(arr, segment, i + 1));
+    });
+    wrap.appendChild(row);
+    return wrap;
+  }
+
+  function renderPipelineOptions(p) {
+    var wrap = DP.el("div", { class: "pe-pipeline-opts" },
+      DP.el("div", { class: "pe-segment-label", text: "pipeline 选项" })
+    );
+    var row = DP.el("div", { class: "pe-opts-row" });
+    var modeWrap = DP.el("div", { class: "pe-opt" }, DP.el("label", { text: "运行模式" }));
+    var modeSel = DP.el("select", {});
+    ["full", "incremental", "mirror"].forEach(function (m) {
+      modeSel.appendChild(DP.el("option", { value: m, text: m, selected: p.mode === m }));
+    });
+    modeSel.addEventListener("change", function () { p.mode = modeSel.value; });
+    modeWrap.appendChild(modeSel);
+    row.appendChild(modeWrap);
+    var cdWrap = DP.el("div", { class: "pe-opt" }, DP.el("label", { text: "变更检测" }));
+    var cdSel = DP.el("select", {});
+    ["", "mtime", "hash"].forEach(function (c) {
+      cdSel.appendChild(DP.el("option", { value: c, text: c || "（无）", selected: p.change_detection === c }));
+    });
+    cdSel.addEventListener("change", function () { p.change_detection = cdSel.value; });
+    cdWrap.appendChild(cdSel);
+    row.appendChild(cdWrap);
+    var sfWrap = DP.el("div", { class: "pe-opt" }, DP.el("label", { text: "state_file" }));
+    var sfIn = DP.el("input", { value: p.state_file || "", placeholder: "（可选）" });
+    sfIn.addEventListener("input", function () { p.state_file = sfIn.value; });
+    sfWrap.appendChild(sfIn);
+    row.appendChild(sfWrap);
+    wrap.appendChild(row);
+    return wrap;
+  }
+
+  function renderParams() {
+    // Task 6 实现
   }
 
   window.PipelineEditor = {
