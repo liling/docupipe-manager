@@ -204,7 +204,7 @@
           var btn = e.currentTarget;
           showStepMenu(btn, function (type) {
             p.steps.push({ name: type, kwargs: {} }); renderFlow();
-          });
+          }, "steps");
         } })
       )
     );
@@ -220,7 +220,7 @@
             var btn = e.currentTarget;
             showStepMenu(btn, function (type) {
               p[seg].push({ name: type, kwargs: {} }); renderFlow();
-            });
+            }, seg);
           } })
         ));
       }
@@ -263,7 +263,7 @@
       showStepMenu(btn, function (type) {
         arr.splice(index, 0, { name: type, kwargs: {} });
         renderFlow();
-      });
+      }, segment);
     } });
   }
 
@@ -423,9 +423,13 @@
     });
   }
 
-  function stepTypeMenu(onPick) {
+  function stepTypeMenu(onPick, segment) {
     var menu = DP.el("div", { class: "pe-step-menu" });
-    PipelineSchema.steps.forEach(function (d) {
+    var suitable = PipelineSchema.steps.filter(function (s) {
+      var isFinalize = s.stage === "finalize";
+      return segment === "finalize_steps" ? isFinalize : !isFinalize;
+    });
+    suitable.forEach(function (d) {
       menu.appendChild(DP.el("button", { type: "button", class: "pe-step-menu-item", text: d.label, onClick: function () {
         onPick(d.type); openMenu = null; dialog.removeChild(menu);
       } }));
@@ -435,9 +439,9 @@
   }
 
   var openMenu = null;
-  function showStepMenu(anchor, onPick) {
+  function showStepMenu(anchor, onPick, segment) {
     if (openMenu) { dialog.removeChild(openMenu); openMenu = null; }
-    var menu = stepTypeMenu(onPick);
+    var menu = stepTypeMenu(onPick, segment);
     var r = anchor.getBoundingClientRect();
     var dr = dialog.getBoundingClientRect();
     menu.style.position = "absolute";

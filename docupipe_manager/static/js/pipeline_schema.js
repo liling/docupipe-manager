@@ -79,7 +79,7 @@
       ]
     },
     {
-      type: "tencent_delete", label: "腾讯文档删除",
+      type: "tencent_delete", label: "腾讯文档删除", stage: "finalize",
       params: [
         { name: "remove_type", label: "删除类型", type: "enum", options: ["current", "all"], default: "current" }
       ]
