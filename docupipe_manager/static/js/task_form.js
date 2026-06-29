@@ -38,6 +38,13 @@ const tid = root.dataset.taskId;
   cronEditBtn.addEventListener("click", function () {
     if (window.CronEditor) CronEditor.open(cronInput);
   });
+  var pipelineEditBtn = document.getElementById("pipeline-edit-btn");
+  var cfgTextarea = document.querySelector('[name="config_yaml"]');
+  if (pipelineEditBtn) {
+    pipelineEditBtn.addEventListener("click", function () {
+      if (window.PipelineEditor) PipelineEditor.open(cfgTextarea);
+    });
+  }
 })();
 
 document.getElementById("task-form").addEventListener("submit", async (e) => {

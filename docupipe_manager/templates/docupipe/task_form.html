@@ -18,8 +18,11 @@
     </div>
     <div class="form-group">
       <label>config.yaml</label>
-      <textarea name="config_yaml" rows="12" class="form-control input-mono" required>pipelines:
+      <div class="config-row">
+        <textarea name="config_yaml" rows="12" class="form-control input-mono" required>pipelines:
   - name: default</textarea>
+        <button type="button" id="pipeline-edit-btn" class="btn btn-secondary">图形编辑</button>
+      </div>
     </div>
     <div class="form-group">
       <div class="schedule-row">
@@ -83,8 +86,12 @@
     </div>
   </form>
 </dialog>
+<dialog id="pipeline-editor-dialog" class="pipeline-dialog"></dialog>
 <script src="/docupipe/static/vendor/cronstrue/cronstrue.min.js"></script>
 <script src="/docupipe/static/vendor/cronstrue/zh_CN.min.js"></script>
 <script src="/docupipe/static/js/cron_editor.js"></script>
+<script src="/docupipe/static/vendor/js-yaml/js-yaml.min.js"></script>
+<script src="/docupipe/static/js/pipeline_schema.js"></script>
+<script src="/docupipe/static/js/pipeline_editor.js"></script>
 <script src="/docupipe/static/js/task_form.js"></script>
 {% endblock %}
