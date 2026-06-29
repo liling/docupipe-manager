@@ -212,7 +212,7 @@
     }
 
     var mainWrap = DP.el("div", { class: "pe-segment" },
-      DP.el("div", { class: "pe-segment-label", text: "文档流向" }), mainRow,
+      DP.el("div", { class: "pe-segment-label" }, "文档流向", helpIcon("文档从来源读取，依次经过处理步骤转换（如格式转换、图片描述），最终写入目的地。写入后步骤在文档写入目的地之后执行。")), mainRow,
       DP.el("div", { class: "pe-add-step-row" },
         DP.el("button", { type: "button", class: "btn btn-secondary btn-sm", text: "+ 添加处理步骤", onClick: function (e) {
           var btn = e.currentTarget;
@@ -314,7 +314,7 @@
 
   function renderPipelineOptions(p) {
     var wrap = DP.el("div", { class: "pe-pipeline-opts" },
-      DP.el("div", { class: "pe-segment-label", text: "pipeline 选项" })
+      DP.el("div", { class: "pe-segment-label" }, "pipeline 选项", helpIcon("运行模式：full=处理所有文档，incremental=仅处理新增文档，mirror=镜像同步含删除。变更检测：mtime=按修改时间判断，hash=按内容哈希判断。仅 mirror 模式需指定变更检测。"))
     );
     var row = DP.el("div", { class: "pe-opts-row" });
     var modeWrap = DP.el("div", { class: "pe-opt" }, DP.el("label", { text: "运行模式" }));
@@ -496,6 +496,32 @@
     });
     card.addEventListener("dragend", function () { card.classList.remove("is-dragging"); });
     return card;
+  }
+
+  var openHelp = null;
+  function showHelp(anchor, text) {
+    if (openHelp) { dialog.removeChild(openHelp); openHelp = null; }
+    var bubble = DP.el("div", { class: "pe-help-bubble", text: text });
+    var r = anchor.getBoundingClientRect();
+    var dr = dialog.getBoundingClientRect();
+    bubble.style.position = "absolute";
+    bubble.style.left = (r.left - dr.left) + "px";
+    bubble.style.top = (r.bottom - dr.top + 4) + "px";
+    dialog.appendChild(bubble);
+    openHelp = bubble;
+    setTimeout(function () {
+      document.addEventListener("click", function close() {
+        if (openHelp) { dialog.removeChild(openHelp); openHelp = null; }
+        document.removeEventListener("click", close);
+      }, { once: true });
+    }, 0);
+  }
+
+  function helpIcon(text) {
+    return DP.el("span", { class: "pe-help-icon", text: "?", onClick: function (e) {
+      e.stopPropagation();
+      showHelp(e.currentTarget, text);
+    } });
   }
 
   window.PipelineEditor = {
