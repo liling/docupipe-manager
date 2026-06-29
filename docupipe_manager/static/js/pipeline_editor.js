@@ -170,7 +170,7 @@
       activeIdx = parseInt(pipelineSelect.value, 10) || 0;
       renderFlow();
     });
-    dialog.addEventListener("click", function (e) { if (e.target === dialog) dialog.close(); });
+    dialog.addEventListener("cancel", function (e) { e.preventDefault(); });
   }
 
   var selected = null; // { segment, index }
