@@ -10,7 +10,7 @@
         { name: "space_id", label: "知识库 ID", type: "str", help: "与 space 二选一（wiki 模式必填其一）" },
         { name: "folder_id", label: "文件夹 ID", type: "str", help: "doc 模式必填" },
         { name: "folders", label: "文件夹路径", type: "list", help: "可多行，如 产品规划/解决方案" },
-        { name: "include_types", label: "仅含类型", type: "list", help: "内容类型白名单，如 DOCUMENT,FILE" }
+        { name: "include_types", label: "仅含类型", type: "list", default: ["DOCUMENT", "FILE"], help: "内容类型白名单" }
       ]
     },
     {
