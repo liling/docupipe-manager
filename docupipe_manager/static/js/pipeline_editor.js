@@ -427,7 +427,7 @@
     var menu = DP.el("div", { class: "pe-step-menu" });
     PipelineSchema.steps.forEach(function (d) {
       menu.appendChild(DP.el("button", { type: "button", class: "pe-step-menu-item", text: d.label, onClick: function () {
-        onPick(d.type); document.body.removeChild(menu);
+        onPick(d.type); dialog.removeChild(menu);
       } }));
     });
     menu.style.position = "absolute";
@@ -436,16 +436,16 @@
 
   var openMenu = null;
   function showStepMenu(anchor, onPick) {
-    if (openMenu) { document.body.removeChild(openMenu); openMenu = null; }
+    if (openMenu) { dialog.removeChild(openMenu); openMenu = null; }
     var menu = stepTypeMenu(onPick);
     var r = anchor.getBoundingClientRect();
     menu.style.left = r.left + "px";
     menu.style.top = (r.bottom + 4) + "px";
-    document.body.appendChild(menu);
+    dialog.appendChild(menu);
     openMenu = menu;
     setTimeout(function () {
       document.addEventListener("click", function close() {
-        if (openMenu) { document.body.removeChild(openMenu); openMenu = null; }
+        if (openMenu) { dialog.removeChild(openMenu); openMenu = null; }
         document.removeEventListener("click", close);
       }, { once: true });
     }, 0);
