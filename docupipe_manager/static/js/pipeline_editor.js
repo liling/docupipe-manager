@@ -229,6 +229,7 @@
         } })
       )
     );
+    flowEl.appendChild(renderPipelineOptions(p));
     flowEl.appendChild(mainWrap);
 
     ["finalize_steps"].forEach(function (seg) {
@@ -246,8 +247,6 @@
         ));
       }
     });
-
-    flowEl.appendChild(renderPipelineOptions(p));
 
     renderParams();
   }
