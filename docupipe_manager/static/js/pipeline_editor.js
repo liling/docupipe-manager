@@ -161,11 +161,12 @@
     errEl = DP.el("div", { class: "pipeline-err" });
     flowEl = DP.el("div", { class: "pipeline-flow" });
     paramsEl = DP.el("div", { class: "pipeline-params" });
-    var actions = DP.el("div", { class: "form-actions" },
+    var body = DP.el("div", { class: "pipeline-body" }, errEl, flowEl, paramsEl);
+    var actions = DP.el("div", { class: "form-actions pipeline-actions" },
       DP.el("button", { type: "button", class: "btn btn-secondary", text: "取消", onClick: function () { dialog.close(); } }),
       okBtn = DP.el("button", { type: "button", class: "btn btn-primary", text: "确定", onClick: confirmDialog })
     );
-    DP.fill(dialog, bar, errEl, flowEl, paramsEl, actions);
+    DP.fill(dialog, bar, body, actions);
     pipelineSelect.addEventListener("change", function () {
       activeIdx = parseInt(pipelineSelect.value, 10) || 0;
       renderFlow();
