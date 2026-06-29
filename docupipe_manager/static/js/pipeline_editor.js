@@ -126,7 +126,12 @@
   function open(input) {
     targetInput = input;
     loadFromInput();
+    document.body.style.overflow = "hidden";
     dialog.showModal();
+  }
+
+  function lockScrollRestore() {
+    document.body.style.overflow = "";
   }
 
   function confirmDialog() {
@@ -172,6 +177,7 @@
       renderFlow();
     });
     dialog.addEventListener("cancel", function (e) { e.preventDefault(); });
+    dialog.addEventListener("close", function () { lockScrollRestore(); });
   }
 
   var selected = null; // { segment, index }
