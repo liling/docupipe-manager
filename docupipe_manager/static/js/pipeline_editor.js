@@ -218,13 +218,13 @@
         DP.el("button", { type: "button", class: "btn btn-secondary btn-sm", text: "+ 添加处理步骤", onClick: function (e) {
           var btn = e.currentTarget;
           showStepMenu(btn, function (type) {
-            p.steps.push({ name: type, kwargs: {} }); renderFlow();
+            p.steps.push({ name: type, kwargs: kwargsWithDefaults("step", type) }); renderFlow();
           }, "steps");
         } }),
         DP.el("button", { type: "button", class: "btn btn-secondary btn-sm", text: "+ 添加写入后步骤", onClick: function (e) {
           var btn = e.currentTarget;
           showStepMenu(btn, function (type) {
-            p.post_steps.push({ name: type, kwargs: {} }); renderFlow();
+            p.post_steps.push({ name: type, kwargs: kwargsWithDefaults("step", type) }); renderFlow();
           }, "post_steps");
         } })
       )
@@ -240,7 +240,7 @@
           DP.el("button", { type: "button", class: "btn btn-secondary btn-sm", text: "+ 添加 " + label, onClick: function (e) {
             var btn = e.currentTarget;
             showStepMenu(btn, function (type) {
-              p[seg].push({ name: type, kwargs: {} }); renderFlow();
+              p[seg].push({ name: type, kwargs: kwargsWithDefaults("step", type) }); renderFlow();
             }, seg);
           } })
         ));
@@ -282,7 +282,7 @@
     return DP.el("button", { type: "button", class: "pe-add-step", text: "+", onClick: function (e) {
       var btn = e.currentTarget;
       showStepMenu(btn, function (type) {
-        arr.splice(index, 0, { name: type, kwargs: {} });
+        arr.splice(index, 0, { name: type, kwargs: kwargsWithDefaults("step", type) });
         renderFlow();
       }, segment);
     } });
@@ -421,7 +421,7 @@
 
     if (kind === "source" || kind === "destination") {
       paramsEl.appendChild(typeSelector(kind, holder.type, function (newType) {
-        holder.type = newType; holder.kwargs = {}; renderFlow();
+        holder.type = newType; holder.kwargs = kwargsWithDefaults(kind, newType); renderFlow();
       }));
     }
 
@@ -460,6 +460,18 @@
   }
 
   var openMenu = null;
+
+  function kwargsWithDefaults(kind, type) {
+    var def = PipelineSchema.findByType(kind, type);
+    var kwargs = {};
+    if (def) {
+      def.params.forEach(function (p) {
+        if (p.default != null && p.name !== "_note") kwargs[p.name] = p.default;
+      });
+    }
+    return kwargs;
+  }
+
   function showStepMenu(anchor, onPick, segment) {
     if (openMenu) { dialog.removeChild(openMenu); openMenu = null; }
     var menu = stepTypeMenu(onPick, segment);
