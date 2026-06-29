@@ -212,8 +212,21 @@
       });
     }
 
+    var finalizeRow = DP.el("div", { class: "pe-node-row pe-finalize-row" });
+    finalizeRow.appendChild(divider("全部完成后"));
+    finalizeRow.appendChild(addStepButton(p.finalize_steps, "finalize_steps", 0));
+    p.finalize_steps.forEach(function (s, i) {
+      var card = nodeCard("step", s.name, "finalize_steps", i, {
+        kindLabel: "收尾", onDelete: function () { p.finalize_steps.splice(i, 1); selected = null; renderFlow(); }
+      });
+      makeDraggable(card, p.finalize_steps, i);
+      finalizeRow.appendChild(card);
+      finalizeRow.appendChild(arrow());
+      finalizeRow.appendChild(addStepButton(p.finalize_steps, "finalize_steps", i + 1));
+    });
+
     var mainWrap = DP.el("div", { class: "pe-segment" },
-      DP.el("div", { class: "pe-segment-label" }, "文档流向", helpIcon("文档从来源读取，依次经过处理步骤转换（如格式转换、图片描述），最终写入目的地。写入后步骤在文档写入目的地之后执行。")), mainRow,
+      DP.el("div", { class: "pe-segment-label" }, "文档流向", helpIcon("文档从来源读取，依次经过处理步骤转换（如格式转换、图片描述），最终写入目的地。写入后步骤在文档写入目的地之后执行。收尾步骤在所有文档处理完成后才执行。")), mainRow, finalizeRow,
       DP.el("div", { class: "pe-add-step-row" },
         DP.el("button", { type: "button", class: "btn btn-secondary btn-sm", text: "+ 添加处理步骤", onClick: function (e) {
           var btn = e.currentTarget;
@@ -226,29 +239,25 @@
           showStepMenu(btn, function (type) {
             p.post_steps.push({ name: type, kwargs: kwargsWithDefaults("step", type) }); renderFlow();
           }, "post_steps");
+        } }),
+        DP.el("button", { type: "button", class: "btn btn-secondary btn-sm", text: "+ 添加收尾步骤", onClick: function (e) {
+          var btn = e.currentTarget;
+          showStepMenu(btn, function (type) {
+            p.finalize_steps.push({ name: type, kwargs: kwargsWithDefaults("step", type) }); renderFlow();
+          }, "finalize_steps");
         } })
       )
     );
     flowEl.appendChild(renderPipelineOptions(p));
     flowEl.appendChild(mainWrap);
 
-    ["finalize_steps"].forEach(function (seg) {
-      var label = "finalize_steps（全部完成后）";
-      if (p[seg].length) {
-        flowEl.appendChild(renderStepsSegment(seg, label));
-      } else {
-        flowEl.appendChild(DP.el("div", { class: "pe-segment pe-collapsed" },
-          DP.el("button", { type: "button", class: "btn btn-secondary btn-sm", text: "+ 添加 " + label, onClick: function (e) {
-            var btn = e.currentTarget;
-            showStepMenu(btn, function (type) {
-              p[seg].push({ name: type, kwargs: kwargsWithDefaults("step", type) }); renderFlow();
-            }, seg);
-          } })
-        ));
-      }
-    });
-
     renderParams();
+  }
+
+  function divider(label) {
+    return DP.el("div", { class: "pe-divider" },
+      DP.el("span", { class: "pe-divider-label", text: label })
+    );
   }
 
   function nodeLabel(kind, type) {

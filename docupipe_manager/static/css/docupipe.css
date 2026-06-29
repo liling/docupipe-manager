@@ -413,6 +413,10 @@ dialog::backdrop { background: rgba(0,0,0,0.3); }
 }
 .pe-add-step:hover { border-color: var(--accent, #4a90d9); color: var(--accent, #4a90d9); }
 .pe-add-step-row { margin-top: 8px; display: flex; gap: 8px; flex-wrap: wrap; }
+.pe-finalize-row { margin-top: 8px; align-items: center; }
+.pe-divider { display: flex; align-items: center; gap: 8px; color: var(--text-secondary, #888); font-size: 11px; }
+.pe-divider::before, .pe-divider::after { content: ""; flex: 1; border-top: 1px dashed var(--border); }
+.pe-divider-label { white-space: nowrap; padding: 0 4px; font-style: italic; }
 
 .pe-pipeline-opts { border: 1px solid var(--border); border-radius: 6px; padding: 10px; }
 .pe-opts-row { display: flex; gap: 14px; flex-wrap: wrap; }
