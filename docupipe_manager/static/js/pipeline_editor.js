@@ -187,9 +187,11 @@
 
     if (p.steps.length) {
       p.steps.forEach(function (s, i) {
-        mainRow.appendChild(nodeCard("step", s.name, "steps", i, {
+        var card = nodeCard("step", s.name, "steps", i, {
           kindLabel: "步骤", onDelete: function () { p.steps.splice(i, 1); selected = null; renderFlow(); }
-        }));
+        });
+        makeDraggable(card, p.steps, i);
+        mainRow.appendChild(card);
         mainRow.appendChild(arrow());
       });
     }
@@ -198,8 +200,11 @@
     var mainWrap = DP.el("div", { class: "pe-segment" },
       DP.el("div", { class: "pe-segment-label", text: "文档流向" }), mainRow,
       DP.el("div", { class: "pe-add-step-row" },
-        DP.el("button", { type: "button", class: "btn btn-secondary btn-sm", text: "+ 添加步骤", onClick: function () {
-          p.steps.push({ name: "convert", kwargs: {} }); renderFlow();
+        DP.el("button", { type: "button", class: "btn btn-secondary btn-sm", text: "+ 添加步骤", onClick: function (e) {
+          var btn = e.currentTarget;
+          showStepMenu(btn, function (type) {
+            p.steps.push({ name: type, kwargs: {} }); renderFlow();
+          });
         } })
       )
     );
@@ -211,8 +216,11 @@
         flowEl.appendChild(renderStepsSegment(seg, label));
       } else {
         flowEl.appendChild(DP.el("div", { class: "pe-segment pe-collapsed" },
-          DP.el("button", { type: "button", class: "btn btn-secondary btn-sm", text: "+ 添加 " + label, onClick: function () {
-            p[seg].push({ name: "convert", kwargs: {} }); renderFlow();
+          DP.el("button", { type: "button", class: "btn btn-secondary btn-sm", text: "+ 添加 " + label, onClick: function (e) {
+            var btn = e.currentTarget;
+            showStepMenu(btn, function (type) {
+              p[seg].push({ name: type, kwargs: {} }); renderFlow();
+            });
           } })
         ));
       }
@@ -250,9 +258,12 @@
   }
 
   function addStepButton(arr, segment, index) {
-    return DP.el("button", { type: "button", class: "pe-add-step", text: "+", onClick: function () {
-      arr.splice(index, 0, { name: "convert", kwargs: {} });
-      renderFlow();
+    return DP.el("button", { type: "button", class: "pe-add-step", text: "+", onClick: function (e) {
+      var btn = e.currentTarget;
+      showStepMenu(btn, function (type) {
+        arr.splice(index, 0, { name: type, kwargs: {} });
+        renderFlow();
+      });
     } });
   }
 
@@ -268,10 +279,12 @@
     var row = DP.el("div", { class: "pe-node-row" });
     row.appendChild(addStepButton(arr, segment, 0));
     arr.forEach(function (s, i) {
-      row.appendChild(nodeCard("step", s.name, segment, i, {
+      var card = nodeCard("step", s.name, segment, i, {
         kindLabel: kindLabel,
         onDelete: function () { arr.splice(i, 1); selected = null; renderFlow(); }
-      }));
+      });
+      makeDraggable(card, arr, i);
+      row.appendChild(card);
       row.appendChild(arrow());
       row.appendChild(addStepButton(arr, segment, i + 1));
     });
@@ -309,8 +322,154 @@
     return wrap;
   }
 
+  function currentSelectedNode() {
+    if (!selected) return null;
+    var p = activePipeline(); if (!p) return null;
+    if (selected.segment === "source") return { kind: "source", holder: p.source };
+    if (selected.segment === "destination") return { kind: "destination", holder: p.destination };
+    var arr = p[selected.segment];
+    var s = arr[selected.index];
+    if (!s) return null;
+    return { kind: "step", holder: { type: s.name, kwargs: s.kwargs }, stepArr: arr, stepIndex: selected.index };
+  }
+
+  function renderField(param, value, onChange) {
+    var wrap = DP.el("div", { class: "pe-field" });
+    var lab = DP.el("label", { text: param.label + (param.required ? " *" : "") });
+    wrap.appendChild(lab);
+    var ctrl;
+    if (param.type === "enum") {
+      ctrl = DP.el("select", {});
+      (param.options || []).forEach(function (o) {
+        ctrl.appendChild(DP.el("option", { value: o, text: o, selected: value === o }));
+      });
+      ctrl.addEventListener("change", function () { onChange(ctrl.value); });
+    } else if (param.type === "bool") {
+      ctrl = DP.el("input", { type: "checkbox" });
+      if (value) ctrl.checked = true;
+      ctrl.addEventListener("change", function () { onChange(ctrl.checked); });
+    } else if (param.type === "list") {
+      ctrl = DP.el("textarea", { rows: 2, placeholder: "每行一项" });
+      ctrl.value = Array.isArray(value) ? value.join("\n") : (value || "");
+      ctrl.addEventListener("input", function () {
+        var lines = ctrl.value.split("\n").map(function (l) { return l.trim(); }).filter(function (l) { return l; });
+        onChange(lines);
+      });
+    } else if (param.type === "int") {
+      ctrl = DP.el("input", { type: "number" });
+      ctrl.value = value != null ? value : (param.default != null ? param.default : "");
+      ctrl.addEventListener("input", function () { onChange(parseInt(ctrl.value, 10) || 0); });
+    } else {
+      if (param.name === "_note") {
+        wrap.appendChild(DP.el("div", { class: "pe-note", text: param.help || "" }));
+        return wrap;
+      }
+      ctrl = DP.el("input", { value: value || "" });
+      ctrl.addEventListener("input", function () { onChange(ctrl.value); });
+    }
+    wrap.appendChild(ctrl);
+    if (param.help) wrap.appendChild(DP.el("div", { class: "pe-help", text: param.help }));
+    if (param.envHint) wrap.appendChild(DP.el("div", { class: "pe-envhint", text: "可留空，从环境变量 " + param.envHint + " 读取" }));
+    return wrap;
+  }
+
+  function typeSelector(kind, currentType, onSelect) {
+    var wrap = DP.el("div", { class: "pe-type-sel" }, DP.el("label", { text: "类型" }));
+    var sel = DP.el("select", {});
+    sel.appendChild(DP.el("option", { value: "", text: "（选择）", selected: !currentType }));
+    var list = kind === "source" ? PipelineSchema.sources : kind === "destination" ? PipelineSchema.destinations : PipelineSchema.steps;
+    list.forEach(function (d) {
+      sel.appendChild(DP.el("option", { value: d.type, text: d.label, selected: currentType === d.type }));
+    });
+    sel.addEventListener("change", function () { onSelect(sel.value); });
+    wrap.appendChild(sel);
+    return wrap;
+  }
+
   function renderParams() {
-    // Task 6 实现
+    DP.clear(paramsEl);
+    var node = currentSelectedNode();
+    if (!node) {
+      paramsEl.appendChild(DP.el("div", { class: "pe-params-empty", text: "点击上方节点编辑参数" }));
+      return;
+    }
+    var kind = node.kind;
+    var holder = node.holder;
+    var title = kind === "source" ? "来源" : kind === "destination" ? "目的地" : "步骤";
+    paramsEl.appendChild(DP.el("div", { class: "pe-params-title", text: "节点参数：" + title + " · " + nodeLabel(kind, holder.type) }));
+
+    if (kind === "source" || kind === "destination") {
+      paramsEl.appendChild(typeSelector(kind, holder.type, function (newType) {
+        holder.type = newType; holder.kwargs = {}; selected = null; renderFlow();
+      }));
+    }
+
+    var def = PipelineSchema.findByType(kind, holder.type);
+    if (!def) {
+      paramsEl.appendChild(DP.el("div", { class: "pe-unknown", text: "未知节点类型：" + holder.type + "（编辑原始 YAML）" }));
+      var ta = DP.el("textarea", { rows: 6, class: "input-mono" });
+      ta.value = window.jsyaml.dump(holder.kwargs || {});
+      ta.addEventListener("input", function () {
+        try { holder.kwargs = window.jsyaml.load(ta.value) || {}; } catch (e) { /* 容忍编辑中语法错误 */ }
+      });
+      paramsEl.appendChild(ta);
+      return;
+    }
+
+    def.params.forEach(function (param) {
+      var val = holder.kwargs[param.name];
+      if (val == null && param.default != null) val = param.default;
+      paramsEl.appendChild(renderField(param, val, function (nv) { holder.kwargs[param.name] = nv; }));
+    });
+  }
+
+  function stepTypeMenu(onPick) {
+    var menu = DP.el("div", { class: "pe-step-menu" });
+    PipelineSchema.steps.forEach(function (d) {
+      menu.appendChild(DP.el("button", { type: "button", class: "pe-step-menu-item", text: d.label, onClick: function () {
+        onPick(d.type); document.body.removeChild(menu);
+      } }));
+    });
+    menu.style.position = "absolute";
+    return menu;
+  }
+
+  var openMenu = null;
+  function showStepMenu(anchor, onPick) {
+    if (openMenu) { document.body.removeChild(openMenu); openMenu = null; }
+    var menu = stepTypeMenu(onPick);
+    var r = anchor.getBoundingClientRect();
+    menu.style.left = r.left + "px";
+    menu.style.top = (r.bottom + 4) + "px";
+    document.body.appendChild(menu);
+    openMenu = menu;
+    setTimeout(function () {
+      document.addEventListener("click", function close() {
+        if (openMenu) { document.body.removeChild(openMenu); openMenu = null; }
+        document.removeEventListener("click", close);
+      }, { once: true });
+    }, 0);
+  }
+
+  function makeDraggable(card, arr, index) {
+    card.draggable = true;
+    card.addEventListener("dragstart", function (e) {
+      e.dataTransfer.setData("text/pe-idx", String(index));
+      card.classList.add("is-dragging");
+    });
+    card.addEventListener("dragover", function (e) { e.preventDefault(); card.classList.add("is-drop-target"); });
+    card.addEventListener("dragleave", function () { card.classList.remove("is-drop-target"); });
+    card.addEventListener("drop", function (e) {
+      e.preventDefault();
+      var from = parseInt(e.dataTransfer.getData("text/pe-idx"), 10);
+      if (isNaN(from) || from === index) return;
+      var moved = arr.splice(from, 1)[0];
+      arr.splice(index, 0, moved);
+      selected = null;
+      renderFlow();
+    });
+    card.addEventListener("dragend", function () { card.classList.remove("is-dragging"); });
+    return card;
   }
 
   window.PipelineEditor = {
