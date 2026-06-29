@@ -212,7 +212,7 @@
       });
     }
 
-    mainRow.appendChild(divider("全部完成后"));
+    mainRow.appendChild(divider());
     mainRow.appendChild(addStepButton(p.finalize_steps, "finalize_steps", 0));
     p.finalize_steps.forEach(function (s, i) {
       var card = nodeCard("step", s.name, "finalize_steps", i, {
@@ -253,9 +253,9 @@
     renderParams();
   }
 
-  function divider(label) {
+  function divider() {
     return DP.el("div", { class: "pe-divider" },
-      DP.el("span", { class: "pe-divider-label", text: label })
+      DP.el("span", { class: "pe-divider-mark" })
     );
   }
 
