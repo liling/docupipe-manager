@@ -76,8 +76,117 @@
     return window.jsyaml.dump(out, { lineWidth: -1, noRefs: true });
   }
 
+  var state = null;
+  var targetInput = null;
+  var dialog, pipelineSelect, flowEl, paramsEl, okBtn, errEl;
+  var activeIdx = 0;
+
+  function activePipeline() {
+    return state.pipelines[activeIdx] || null;
+  }
+
+  function renderPipelineSelector() {
+    DP.fill(pipelineSelect,
+      state.pipelines.map(function (p, i) {
+        return DP.el("option", { value: String(i), text: p.name || "(未命名)" });
+      })
+    );
+    pipelineSelect.value = String(activeIdx);
+  }
+
+  function renderError(msg) {
+    if (msg) {
+      DP.fill(errEl, DP.el("div", { class: "pipeline-error", text: msg }));
+      okBtn.disabled = true;
+    } else {
+      DP.clear(errEl);
+      okBtn.disabled = false;
+    }
+  }
+
+  function loadFromInput() {
+    try {
+      state = parseFromYaml(targetInput.value);
+      if (!state.pipelines.length) {
+        state.pipelines.push(normalizePipeline({ name: "default" }));
+      }
+      activeIdx = 0;
+      renderError("");
+      renderPipelineSelector();
+      renderFlow();
+    } catch (e) {
+      state = null;
+      renderError("YAML 解析失败：" + e.message);
+      DP.clear(pipelineSelect);
+      DP.clear(flowEl);
+      DP.clear(paramsEl);
+    }
+  }
+
+  function open(input) {
+    targetInput = input;
+    loadFromInput();
+    dialog.showModal();
+  }
+
+  function confirmDialog() {
+    if (okBtn.disabled || !state) return;
+    targetInput.value = buildToYaml(state);
+    dialog.close();
+  }
+
+  function init() {
+    dialog = document.getElementById("pipeline-editor-dialog");
+    if (!dialog) return;
+    var bar = DP.el("div", { class: "pipeline-bar" },
+      DP.el("label", { text: "pipeline: " }),
+      pipelineSelect = DP.el("select", { id: "pe-pipeline-select" }),
+      DP.el("button", { type: "button", class: "btn btn-secondary", text: "+新建", onClick: function () {
+        state.pipelines.push(normalizePipeline({ name: "pipeline-" + (state.pipelines.length + 1) }));
+        activeIdx = state.pipelines.length - 1;
+        renderPipelineSelector(); renderFlow();
+      } }),
+      DP.el("button", { type: "button", class: "btn btn-secondary", text: "删除", onClick: function () {
+        if (state.pipelines.length <= 1) return;
+        state.pipelines.splice(activeIdx, 1);
+        activeIdx = Math.min(activeIdx, state.pipelines.length - 1);
+        renderPipelineSelector(); renderFlow();
+      } }),
+      DP.el("button", { type: "button", class: "btn btn-secondary", text: "重命名", onClick: function () {
+        var p = activePipeline(); if (!p) return;
+        var n = prompt("pipeline 名称", p.name);
+        if (n != null) { p.name = n; renderPipelineSelector(); }
+      } })
+    );
+    errEl = DP.el("div", { class: "pipeline-err" });
+    flowEl = DP.el("div", { class: "pipeline-flow" });
+    paramsEl = DP.el("div", { class: "pipeline-params" });
+    var actions = DP.el("div", { class: "form-actions" },
+      DP.el("button", { type: "button", class: "btn btn-secondary", text: "取消", onClick: function () { dialog.close(); } }),
+      okBtn = DP.el("button", { type: "button", class: "btn btn-primary", text: "确定", onClick: confirmDialog })
+    );
+    DP.fill(dialog, bar, errEl, flowEl, paramsEl, actions);
+    pipelineSelect.addEventListener("change", function () {
+      activeIdx = parseInt(pipelineSelect.value, 10) || 0;
+      renderFlow();
+    });
+    dialog.addEventListener("click", function (e) { if (e.target === dialog) dialog.close(); });
+  }
+
+  function renderFlow() {
+    DP.clear(flowEl);
+    DP.clear(paramsEl);
+  }
+
   window.PipelineEditor = {
     _parseFromYaml: parseFromYaml,
-    _buildToYaml: buildToYaml
+    _buildToYaml: buildToYaml,
+    open: open
   };
+
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", init);
+  } else {
+    init();
+  }
 })();
