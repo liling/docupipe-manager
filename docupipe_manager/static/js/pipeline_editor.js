@@ -420,7 +420,7 @@
 
     if (kind === "source" || kind === "destination") {
       paramsEl.appendChild(typeSelector(kind, holder.type, function (newType) {
-        holder.type = newType; holder.kwargs = {}; selected = null; renderFlow();
+        holder.type = newType; holder.kwargs = {}; renderFlow();
       }));
     }
 
