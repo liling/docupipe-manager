@@ -427,7 +427,7 @@
     var menu = DP.el("div", { class: "pe-step-menu" });
     PipelineSchema.steps.forEach(function (d) {
       menu.appendChild(DP.el("button", { type: "button", class: "pe-step-menu-item", text: d.label, onClick: function () {
-        onPick(d.type); dialog.removeChild(menu);
+        onPick(d.type); openMenu = null; dialog.removeChild(menu);
       } }));
     });
     menu.style.position = "absolute";
