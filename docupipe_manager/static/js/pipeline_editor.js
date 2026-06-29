@@ -439,8 +439,10 @@
     if (openMenu) { dialog.removeChild(openMenu); openMenu = null; }
     var menu = stepTypeMenu(onPick);
     var r = anchor.getBoundingClientRect();
-    menu.style.left = r.left + "px";
-    menu.style.top = (r.bottom + 4) + "px";
+    var dr = dialog.getBoundingClientRect();
+    menu.style.position = "absolute";
+    menu.style.left = (r.left - dr.left) + "px";
+    menu.style.top = (r.bottom - dr.top + 4) + "px";
     dialog.appendChild(menu);
     openMenu = menu;
     setTimeout(function () {
