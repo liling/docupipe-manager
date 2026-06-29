@@ -123,15 +123,32 @@
     }
   }
 
+  var scrollLockY = 0;
+  function lockBodyScroll() {
+    scrollLockY = window.scrollY || window.pageYOffset || 0;
+    var b = document.body;
+    b.style.position = "fixed";
+    b.style.top = "-" + scrollLockY + "px";
+    b.style.left = "0";
+    b.style.right = "0";
+    b.style.width = "100%";
+  }
+
+  function unlockBodyScroll() {
+    var b = document.body;
+    b.style.position = "";
+    b.style.top = "";
+    b.style.left = "";
+    b.style.right = "";
+    b.style.width = "";
+    window.scrollTo(0, scrollLockY);
+  }
+
   function open(input) {
     targetInput = input;
     loadFromInput();
-    document.body.style.overflow = "hidden";
+    lockBodyScroll();
     dialog.showModal();
-  }
-
-  function lockScrollRestore() {
-    document.body.style.overflow = "";
   }
 
   function confirmDialog() {
@@ -177,7 +194,7 @@
       renderFlow();
     });
     dialog.addEventListener("cancel", function (e) { e.preventDefault(); });
-    dialog.addEventListener("close", function () { lockScrollRestore(); });
+    dialog.addEventListener("close", function () { unlockBodyScroll(); });
   }
 
   var selected = null; // { segment, index }
